@@ -1,24 +1,22 @@
 # Inventario por facturación
 
-Aplicación sencilla para un usuario, adaptable a computador y teléfono, pensada para 10–15 facturas/boletas mensuales de 5–6 proveedores.
-
-## Estado
-
-Prototipo inicial en Streamlit y SQLite. Permite mantener productos en unidades, stock, costo unitario, margen editable por producto y precio sugerido; admite registrar una compra con datos revisados manualmente y conserva cabecera y movimientos en base local.
+Aplicación Streamlit para revisar facturas y boletas, registrar stock por unidades y mantener costo/margen por producto.
 
 ## Ejecutar en Windows
 
-1. Instalar Python 3.10+.
-2. En una terminal: `pip install -r requirements.txt`
-3. Ejecutar: `streamlit run app.py`
+1. Instala Python 3.10 o superior.
+2. Instala Tesseract OCR con idiomas español e inglés y verifica que `tesseract` esté en PATH.
+3. Ejecuta `pip install -r requirements.txt`.
+4. En la carpeta del proyecto, ejecuta `streamlit run app.py`.
 
-## Decisiones y siguientes pasos
+## Flujo de documentos
 
-- Flujo objetivo: cargar PDF/imagen → extraer proveedor, número, fecha y líneas como borrador → revisar/editar → confirmar movimiento → actualizar stock.
-- Este primer prototipo todavía no implementa OCR, almacenamiento del archivo original ni exportación Excel. No confirma automáticamente datos extraídos.
-- Para OCR, probar primero los documentos reales de los 5–6 proveedores y elegir una opción de bajo costo; incorporar proveedor/fecha/número y productos con confianza por campo.
-- Añadir revisión de duplicados por proveedor + número de documento, edición de movimientos, historial auditable, respaldo y exportación XLSX.
-- Mantener el archivo de datos fuera del repositorio. SQLite local es simple para un único usuario; para acceso sincronizado desde distintos dispositivos se requiere alojar la app y base de datos/archivos en un servicio con almacenamiento persistente. No sincronizar SQLite mediante carpetas compartidas en nube.
-- El margen actual es markup sobre costo: precio = costo × (1 + margen/100). Si se desea margen bruto sobre precio de venta, la fórmula cambia y debe decidirse antes de usar precios como definitivos.
+Carga varios PDF o imágenes; cada archivo entra como documento separado en la bandeja. El OCR local Tesseract extrae texto. Puedes optar manualmente por OpenAI para leer proveedor, folio, fecha y líneas de productos con más estructura; eso envía el documento a OpenAI y puede generar consumo de API. Configura `OPENAI_API_KEY` como variable de entorno o secreto de Streamlit. Nunca pongas la clave en el código.
 
-Se revisará la lectura OCR y el despliegue después de definir presupuesto de alojamiento y método de acceso desde ambos dispositivos.
+Revisa/edita todos los campos y confirma cada documento por separado. El stock solo cambia al confirmar. El registro guarda movimientos ligados al documento.
+
+## Importante
+
+La extracción OCR es un borrador: confirma nombres, unidades y costos contra el original. Tesseract extrae texto, pero no entiende de forma fiable las tablas de todas las facturas; la opción OpenAI intenta estructurar esas líneas. La app guarda la base local en `inventario.db` y documentos confirmados en `documentos/`; no subas esos datos comerciales al repositorio.
+
+El precio sugerido usa markup sobre costo: `costo × (1 + margen/100)`. El margen se edita por producto.
