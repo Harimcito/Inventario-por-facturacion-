@@ -1,85 +1,141 @@
-import sqlite3
+import os, re, json, sqlite3
 from pathlib import Path
+from datetime import date
 import streamlit as st
+from PIL import Image
+import pytesseract
+import pypdfium2 as pdfium
 
-DB = Path("inventario.db")
+ROOT=Path(__file__).parent
+DB=ROOT/"inventario.db"
+DOCS=ROOT/"documentos"; DOCS.mkdir(exist_ok=True)
 
 def db():
-    con = sqlite3.connect(DB)
-    con.row_factory = sqlite3.Row
-    con.executescript("""
-    CREATE TABLE IF NOT EXISTS products(
-      id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT DEFAULT '',
-      stock INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0,
-      margin REAL NOT NULL DEFAULT 30, active INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE TABLE IF NOT EXISTS receipts(
-      id INTEGER PRIMARY KEY, supplier TEXT, invoice_no TEXT, doc_date TEXT,
-      filename TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS movements(
-      id INTEGER PRIMARY KEY, product_id INTEGER, receipt_id INTEGER,
-      quantity INTEGER NOT NULL, unit_cost INTEGER NOT NULL,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY(product_id) REFERENCES products(id),
-      FOREIGN KEY(receipt_id) REFERENCES receipts(id)
-    );
-    """)
-    return con
+ c=sqlite3.connect(DB); c.row_factory=sqlite3.Row
+ c.executescript("""
+ CREATE TABLE IF NOT EXISTS products(id INTEGER PRIMARY KEY,name TEXT UNIQUE,category TEXT DEFAULT '',stock INTEGER DEFAULT 0,cost INTEGER DEFAULT 0,margin REAL DEFAULT 30,active INTEGER DEFAULT 1);
+ CREATE TABLE IF NOT EXISTS receipts(id INTEGER PRIMARY KEY,supplier TEXT,invoice_no TEXT,doc_date TEXT,filename TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+ CREATE TABLE IF NOT EXISTS movements(id INTEGER PRIMARY KEY,product_id INTEGER,receipt_id INTEGER,quantity INTEGER,unit_cost INTEGER,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+ """); return c
 
-st.set_page_config(page_title="Inventario Gioval", page_icon="📦", layout="wide")
-st.title("📦 Inventario por facturación")
-st.caption("Carga documentos, revisa los productos y confirma el ingreso al stock.")
-tab_stock, tab_receipt, tab_rules = st.tabs(["Inventario", "Ingresar compra", "Configuración"])
+def images(data,name):
+ if name.lower().endswith(".pdf"):
+  pdf=pdfium.PdfDocument(data); return [p.render(scale=1.7).to_pil().convert("RGB") for p in pdf]
+ return [Image.open(__import__("io").BytesIO(data)).convert("RGB")]
 
-with tab_stock:
-    con = db()
-    products = con.execute("SELECT * FROM products WHERE active=1 ORDER BY name").fetchall()
-    if products:
-        st.dataframe([{"Producto":p["name"],"Categoría":p["category"],"Stock":p["stock"],
-          "Costo":p["cost"],"Margen %":p["margin"],"Precio sugerido":round(p["cost"]*(1+p["margin"]/100))}
-          for p in products], use_container_width=True, hide_index=True)
-    else: st.info("Aún no hay productos. Registra la primera compra en Ingresar compra.")
-    with st.expander("Crear o editar producto"):
-        with st.form("product"):
-            name=st.text_input("Nombre del producto")
-            category=st.text_input("Categoría")
-            stock=st.number_input("Stock inicial (unidades)",min_value=0,step=1)
-            cost=st.number_input("Costo unitario ($)",min_value=0,step=1)
-            margin=st.number_input("Margen sobre costo (%)",min_value=0.0,value=30.0,step=1.0)
-            if st.form_submit_button("Guardar producto") and name.strip():
-                con.execute("INSERT INTO products(name,category,stock,cost,margin) VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET category=excluded.category, stock=excluded.stock, cost=excluded.cost, margin=excluded.margin",
-                    (name.strip(),category.strip(),stock,cost,margin)); con.commit(); st.rerun()
+def local_ocr(data,name):
+ return "\n".join(pytesseract.image_to_string(im,lang="spa+eng") for im in images(data,name))
 
-with tab_receipt:
-    st.subheader("Documento de compra")
-    uploaded=st.file_uploader("Factura o boleta (PDF, JPG, PNG)",type=["pdf","jpg","jpeg","png"])
-    st.caption("Primera versión: captura asistida. Revisa y confirma cada línea antes de afectar el stock.")
-    supplier=st.text_input("Proveedor")
-    invoice=st.text_input("N.º de documento")
-    doc_date=st.date_input("Fecha")
-    con=db()
-    catalog=[r["name"] for r in con.execute("SELECT name FROM products WHERE active=1 ORDER BY name")]
-    n=st.number_input("Cantidad de productos",min_value=1,max_value=30,value=1)
-    rows=[]
-    for i in range(int(n)):
-        a,b,c=st.columns([3,1,1])
-        with a: product=st.selectbox(f"Producto {i+1}",["+ Nuevo producto"]+catalog,key=f"p{i}")
-        with b: qty=st.number_input("Unidades",min_value=1,step=1,key=f"q{i}")
-        with c: cost=st.number_input("Costo unitario",min_value=0,step=1,key=f"c{i}")
-        rows.append((product,qty,cost))
-    if st.button("Confirmar ingreso",type="primary",disabled=not uploaded):
-        con.execute("INSERT INTO receipts(supplier,invoice_no,doc_date,filename) VALUES(?,?,?,?)",
-          (supplier,invoice,str(doc_date),uploaded.name)); rid=con.execute("SELECT last_insert_rowid()").fetchone()[0]
-        for product,qty,cost in rows:
-            if product=="+ Nuevo producto" or not product:
-                continue
-            pid=con.execute("SELECT id FROM products WHERE name=?",(product,)).fetchone()[0]
-            con.execute("UPDATE products SET stock=stock+?, cost=? WHERE id=?",(qty,cost,pid))
-            con.execute("INSERT INTO movements(product_id,receipt_id,quantity,unit_cost) VALUES(?,?,?,?)",(pid,rid,qty,cost))
-        con.commit(); st.success("Compra registrada y stock actualizado."); st.rerun()
+def openai_extract(data,name):
+ from openai import OpenAI
+ client=OpenAI(api_key=st.secrets.get("OPENAI_API_KEY",os.getenv("OPENAI_API_KEY")))
+ chunks=[]
+ for im in images(data,name):
+  import base64, io
+  b=io.BytesIO(); im.thumbnail((1800,1800)); im.save(b,format="JPEG",quality=82)
+  chunks.append({"type":"image_url","image_url":{"url":"data:image/jpeg;base64,"+base64.b64encode(b.getvalue()).decode()}})
+ prompt="""Lee esta factura/boleta chilena. Devuelve SOLO JSON: {proveedor, numero, fecha(YYYY-MM-DD o vacío), productos:[{nombre,cantidad(unidades enteras),costo_unitario(entero CLP)}]}. No inventes valores: usa vacío o 0 si no se distingue. Divide cajas solo si el documento indica unidades claramente."""
+ res=client.chat.completions.create(model="gpt-4o-mini",messages=[{"role":"user","content":[{"type":"text","text":prompt},*chunks]}],response_format={"type":"json_object"},max_tokens=3000)
+ return json.loads(res.choices[0].message.content)
 
-with tab_rules:
-    st.markdown("### Precio sugerido")
-    st.write("Precio = costo unitario × (1 + margen / 100). El margen se configura por producto y puede editarse en Inventario.")
-    st.info("La extracción automática del documento y la exportación Excel son las siguientes etapas. Este prototipo no lee el archivo todavía; requiere revisar manualmente los datos antes de confirmar.")
+st.set_page_config(page_title="Inventario Gioval",page_icon="📦",layout="wide")
+st.markdown("<style>.block-container{max-width:1280px;padding-top:1.5rem}[data-testid=stMetric]{background:#f3f6fa;padding:14px;border-radius:12px}section[data-testid=stSidebar]{background:#f7f9fc}</style>",unsafe_allow_html=True)
+con=db()
+st.sidebar.title("📦 Inventario")
+page=st.sidebar.radio("Secciones",["Resumen","Revisar documentos","Productos","Movimientos"])
+st.sidebar.caption("Cada documento afecta el stock solo después de confirmarlo.")
+if page=="Resumen":
+ st.title("Inventario de mercadería"); st.caption("Compras revisadas, stock y precios sugeridos.")
+ ps=con.execute("select * from products where active=1 order by name").fetchall()
+ docs=con.execute("select count(*) n from receipts").fetchone()["n"]
+ a,b,c,d=st.columns(4); a.metric("Productos",len(ps)); b.metric("Unidades",sum(p["stock"] for p in ps)); c.metric("Documentos",docs); d.metric("Stock bajo",sum(p["stock"]<=3 for p in ps))
+ st.subheader("Stock actual")
+ if ps: st.dataframe([{"Producto":p["name"],"Categoría":p["category"],"Stock":p["stock"],"Costo":p["cost"],"Margen %":p["margin"],"Precio sugerido":round(p["cost"]*(1+p["margin"]/100))} for p in ps],use_container_width=True,hide_index=True)
+ else: st.info("Agrega productos desde Productos o desde la revisión de una compra.")
+elif page=="Revisar documentos":
+ st.title("Facturas y boletas"); st.caption("Carga en lote. El OCR crea un borrador separado para cada archivo; revisa y confirma cada uno.")
+ uploads=st.file_uploader("Selecciona varios PDF o imágenes",type=["pdf","png","jpg","jpeg"],accept_multiple_files=True)
+ if uploads and st.button(f"Preparar {len(uploads)} documento(s)",type="primary"):
+  q=st.session_state.setdefault("queue",{})
+  for f in uploads:
+   if f.name not in q: q[f.name]={"bytes":f.getvalue(),"supplier":"","number":"","date":date.today(),"items":[],"raw":""}
+  st.rerun()
+ q=st.session_state.setdefault("queue",{})
+ if q:
+  name=st.selectbox("Documento por revisar",list(q),format_func=lambda n:"🟠 "+n); item=q[name]
+  x,y=st.columns([1,1.2],gap="large")
+  with x:
+   st.subheader("Original")
+   if name.lower().endswith((".jpg",".jpeg",".png")): st.image(item["bytes"],use_container_width=True)
+   else: st.download_button("Descargar / abrir PDF",item["bytes"],file_name=name)
+   engine=st.radio("Lectura",["OCR local (Tesseract)","OpenAI opcional"],horizontal=False,key="engine"+name)
+   if st.button("Leer documento",key="ocr"+name):
+    try:
+     if engine=="OCR local (Tesseract)":
+      text=local_ocr(item["bytes"],name); item["raw"]=text
+      item["supplier"]=item["supplier"] or (text.splitlines()[0][:100] if text.strip() else "")
+      st.warning("OCR local extrajo texto. Revisa e ingresa/ajusta cada línea; lectura de tablas depende del formato.")
+     else:
+      data=openai_extract(item["bytes"],name)
+      item["supplier"]=data.get("proveedor",""); item["number"]=data.get("numero","")
+      try: item["date"]=date.fromisoformat(data.get("fecha",""))
+      except: pass
+      item["items"]=data.get("productos",[])
+      st.success("Lectura asistida lista. Confirma cada campo.")
+    except Exception as e:
+     st.error("No se pudo leer. Comprueba Tesseract (idiomas spa+eng) o la clave OPENAI_API_KEY. Detalle: "+str(e)[:300])
+   if item["raw"]:
+    with st.expander("Texto OCR local"): st.text(item["raw"])
+  with y:
+   st.subheader("Revisión editable")
+   item["supplier"]=st.text_input("Proveedor",item["supplier"],key="s"+name)
+   item["number"]=st.text_input("Número del documento",item["number"],key="n"+name)
+   item["date"]=st.date_input("Fecha",value=item["date"],key="d"+name)
+   catalog=con.execute("select id,name from products where active=1 order by name").fetchall()
+   names=[p["name"] for p in catalog]
+   if not item["items"]: item["items"]=[{"nombre":"","cantidad":1,"costo_unitario":0}]
+   st.markdown("**Productos del documento**")
+   changed=[]
+   for i,r in enumerate(item["items"]):
+    aa,bb,cc=st.columns([3,1,1.3])
+    with aa: nm=st.text_input(f"Producto {i+1}",r.get("nombre",""),key=f"nm{name}{i}")
+    with bb: qty=st.number_input("Unidades",1,100000,int(r.get("cantidad") or 1),key=f"qt{name}{i}")
+    with cc: cost=st.number_input("Costo unitario",0,100000000,int(r.get("costo_unitario") or 0),key=f"cs{name}{i}")
+    changed.append({"nombre":nm,"cantidad":qty,"costo_unitario":cost})
+   item["items"]=changed
+   if st.button("＋ Agregar línea",key="add"+name): item["items"].append({"nombre":"","cantidad":1,"costo_unitario":0}); st.rerun()
+   if st.button("Confirmar documento e ingresar al stock",type="primary",key="ok"+name):
+    if not all(r["nombre"].strip() for r in changed): st.error("Completa el nombre de cada producto.")
+    else:
+     rid=con.execute("insert into receipts(supplier,invoice_no,doc_date,filename) values(?,?,?,?)",(item["supplier"],item["number"],str(item["date"]),name)).lastrowid
+     for r in changed:
+      row=con.execute("select id from products where name=?",(r["nombre"].strip(),)).fetchone()
+      if not row:
+       con.execute("insert into products(name,stock,cost) values(?,?,?)",(r["nombre"].strip(),0,r["costo_unitario"]))
+       row=con.execute("select id from products where name=?",(r["nombre"].strip(),)).fetchone()
+      con.execute("update products set stock=stock+?,cost=? where id=?",(r["cantidad"],r["costo_unitario"],row["id"]))
+      con.execute("insert into movements(product_id,receipt_id,quantity,unit_cost) values(?,?,?,?)",(row["id"],rid,r["cantidad"],r["costo_unitario"]))
+     (DOCS/name).write_bytes(item["bytes"]); con.commit(); del q[name]; st.success("Confirmado; stock actualizado."); st.rerun()
+   if st.button("Eliminar de la bandeja",key="del"+name): del q[name]; st.rerun()
+ else: st.info("Selecciona uno o más documentos para empezar.")
+elif page=="Productos":
+ st.title("Productos"); st.caption("Stock por unidades; margen editable por producto.")
+ with st.expander("＋ Nuevo producto"):
+  with st.form("new"):
+   n=st.text_input("Nombre"); cat=st.text_input("Categoría"); stock=st.number_input("Stock",0,100000,0); cost=st.number_input("Costo",0,100000000,0); margin=st.number_input("Margen sobre costo (%)",0.,10000.,30.)
+   if st.form_submit_button("Guardar") and n.strip():
+    try: con.execute("insert into products(name,category,stock,cost,margin) values(?,?,?,?,?)",(n,cat,stock,cost,margin)); con.commit(); st.rerun()
+    except sqlite3.IntegrityError: st.error("Ese producto ya existe.")
+ ps=con.execute("select * from products order by name").fetchall()
+ if ps: st.dataframe([{"Producto":p["name"],"Categoría":p["category"],"Stock":p["stock"],"Costo":p["cost"],"Margen %":p["margin"],"Precio sugerido":round(p["cost"]*(1+p["margin"]/100))} for p in ps],use_container_width=True,hide_index=True)
+ if ps:
+  with st.expander("Editar stock, categoría, costo y margen"):
+   p=st.selectbox("Producto",ps,format_func=lambda p:p["name"])
+   with st.form("edit"):
+    cat=st.text_input("Categoría",p["category"]); stock=st.number_input("Stock",0,100000,p["stock"]); cost=st.number_input("Costo",0,100000000,p["cost"]); margin=st.number_input("Margen %",0.,10000.,float(p["margin"]))
+    if st.form_submit_button("Guardar cambios"):
+     con.execute("update products set category=?,stock=?,cost=?,margin=? where id=?",(cat,stock,cost,margin,p["id"])); con.commit(); st.rerun()
+elif page=="Movimientos":
+ st.title("Movimientos"); rows=con.execute("select m.created_at,p.name,r.supplier,r.invoice_no,r.filename,m.quantity,m.unit_cost from movements m join products p on p.id=m.product_id join receipts r on r.id=m.receipt_id order by m.id desc").fetchall()
+ if rows: st.dataframe([dict(r) for r in rows],use_container_width=True,hide_index=True)
+ else: st.info("Aún no hay movimientos.")
