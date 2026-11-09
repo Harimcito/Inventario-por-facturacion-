@@ -1,22 +1,24 @@
 # Inventario por facturación
 
-Aplicación Streamlit para revisar facturas y boletas, registrar stock por unidades y mantener costo/margen por producto.
+Aplicación Streamlit para revisar compras, registrar stock por unidades y mantener costo/margen por producto.
+
+## Documentos
+
+- **XML DTE del SII:** la app identifica cada DTE dentro del archivo, extrae proveedor, RUT, tipo, folio, fecha, total y líneas del detalle. Cada factura queda en la bandeja separada para revisión. Solo la confirmación modifica stock.
+- **PDF e imagen:** pueden cargarse en lote y revisarse con OCR Tesseract local o con OpenAI opcional. La opción OpenAI envía el documento a la API y puede generar consumo; no se activa sola.
+- El importador XML está en `sii_xml.py`; el ejemplo de prueba anonimizado está en `samples/dte_ejemplo_sii.xml`.
+
+El SII permite generar un archivo XML de respaldo desde Historial de DTE recibidos: [guía oficial](https://www.sii.cl/destacados/factura_electronica/guias_ayuda/como_generar_archivo_respaldo.htm). Descarga ese respaldo y cárgalo en Documentos de compra. No hace falta entregar la Clave Tributaria a esta app.
 
 ## Ejecutar en Windows
 
 1. Instala Python 3.10 o superior.
-2. Instala Tesseract OCR con idiomas español e inglés y verifica que `tesseract` esté en PATH.
+2. Para imagen/PDF local, instala Tesseract OCR con español e inglés y verifica que `tesseract` esté en PATH.
 3. Ejecuta `pip install -r requirements.txt`.
-4. En la carpeta del proyecto, ejecuta `streamlit run app.py`.
+4. Ejecuta `streamlit run app.py`.
 
-## Flujo de documentos
+## Revisar y confirmar
 
-Carga varios PDF o imágenes; cada archivo entra como documento separado en la bandeja. El OCR local Tesseract extrae texto. Puedes optar manualmente por OpenAI para leer proveedor, folio, fecha y líneas de productos con más estructura; eso envía el documento a OpenAI y puede generar consumo de API. Configura `OPENAI_API_KEY` como variable de entorno o secreto de Streamlit. Nunca pongas la clave en el código.
+Comprueba nombres, cantidades enteras y costos del detalle antes de confirmar. El importador muestra costo unitario XML y total del documento; confirma tratamiento del costo según tu criterio contable. Se bloquean folios ya registrados para evitar sumar stock dos veces.
 
-Revisa/edita todos los campos y confirma cada documento por separado. El stock solo cambia al confirmar. El registro guarda movimientos ligados al documento.
-
-## Importante
-
-La extracción OCR es un borrador: confirma nombres, unidades y costos contra el original. Tesseract extrae texto, pero no entiende de forma fiable las tablas de todas las facturas; la opción OpenAI intenta estructurar esas líneas. La app guarda la base local en `inventario.db` y documentos confirmados en `documentos/`; no subas esos datos comerciales al repositorio.
-
-El precio sugerido usa markup sobre costo: `costo × (1 + margen/100)`. El margen se edita por producto.
+La app guarda base en `inventario.db` y XML/documentos confirmados en `documentos/`; esos datos comerciales deben permanecer fuera de GitHub. El precio sugerido usa markup: `costo × (1 + margen/100)`.
