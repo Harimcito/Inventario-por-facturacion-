@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F33T123">
+    <Encabezado>
+      <IdDoc><TipoDTE>33</TipoDTE><Folio>123</Folio><FchEmis>2026-01-15</FchEmis></IdDoc>
+      <Emisor><RUTEmisor>76000000-0</RUTEmisor><RznSoc>PROVEEDOR DE PRUEBA</RznSoc></Emisor>
+      <Receptor><RUTRecep>77000000-0</RUTRecep><RznSocRecep>COMPRADOR DE PRUEBA</RznSocRecep></Receptor>
+      <Totales><MntNeto>2500</MntNeto><IVA>475</IVA><MntTotal>2975</MntTotal></Totales>
+    </Encabezado>
+    <Detalle><NroLinDet>1</NroLinDet><NmbItem>Producto de prueba A</NmbItem><QtyItem>2</QtyItem><UnmdItem>UN</UnmdItem><PrcItem>1000</PrcItem><MontoItem>2000</MontoItem></Detalle>
+    <Detalle><NroLinDet>2</NroLinDet><NmbItem>Producto de prueba B</NmbItem><DscItem>Descripción de prueba</DscItem><QtyItem>1</QtyItem><UnmdItem>UN</UnmdItem><PrcItem>500</PrcItem><MontoItem>500</MontoItem></Detalle>
+    <TED version="1.0"/>
+  </Documento>
+</DTE>
