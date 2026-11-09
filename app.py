@@ -5,6 +5,7 @@ import streamlit as st
 from PIL import Image
 import pytesseract
 import pypdfium2 as pdfium
+from sii_xml import parse_dtes
 
 ROOT=Path(__file__).parent
 DB=ROOT/"inventario.db"
@@ -54,11 +55,21 @@ if page=="Resumen":
  else: st.info("Agrega productos desde Productos o desde la revisión de una compra.")
 elif page=="Revisar documentos":
  st.title("Facturas y boletas"); st.caption("Carga en lote. El OCR crea un borrador separado para cada archivo; revisa y confirma cada uno.")
- uploads=st.file_uploader("Selecciona varios PDF o imágenes",type=["pdf","png","jpg","jpeg"],accept_multiple_files=True)
+ uploads=st.file_uploader("Selecciona varios PDF o imágenes",type=["pdf","png","jpg","jpeg","xml"],accept_multiple_files=True)
  if uploads and st.button(f"Preparar {len(uploads)} documento(s)",type="primary"):
   q=st.session_state.setdefault("queue",{})
   for f in uploads:
-   if f.name not in q: q[f.name]={"bytes":f.getvalue(),"supplier":"","number":"","date":date.today(),"items":[],"raw":""}
+   data=f.getvalue()
+   if f.name.lower().endswith(".xml"):
+    try:
+     for idx,dte in enumerate(parse_dtes(data),1):
+      label=f"{dte['proveedor'] or 'Proveedor'} - F{dte['numero'] or idx} ({idx}).xml"
+      label=re.sub(r"[^A-Za-z0-9ÁÉÍÓÚáéíóúÑñ._() -]","_",label)[:160]
+      q.setdefault(label,{"bytes":data,"source_name":f.name,"supplier":dte["proveedor"],"number":dte["numero"],
+       "date":date.fromisoformat(dte["fecha"]) if dte["fecha"] else date.today(),"items":dte["productos"],"raw":"","dte":True,"total":dte["total"]})
+    except Exception as e: st.error(f"No pude leer {f.name}: {e}")
+   elif f.name not in q:
+    q[f.name]={"bytes":data,"source_name":f.name,"supplier":"","number":"","date":date.today(),"items":[],"raw":"","dte":False}
   st.rerun()
  q=st.session_state.setdefault("queue",{})
  if q:
@@ -68,24 +79,28 @@ elif page=="Revisar documentos":
    st.subheader("Original")
    if name.lower().endswith((".jpg",".jpeg",".png")): st.image(item["bytes"],use_container_width=True)
    else: st.download_button("Descargar / abrir PDF",item["bytes"],file_name=name)
-   engine=st.radio("Lectura",["OCR local (Tesseract)","OpenAI opcional"],horizontal=False,key="engine"+name)
-   if st.button("Leer documento",key="ocr"+name):
-    try:
-     if engine=="OCR local (Tesseract)":
-      text=local_ocr(item["bytes"],name); item["raw"]=text
-      item["supplier"]=item["supplier"] or (text.splitlines()[0][:100] if text.strip() else "")
-      st.warning("OCR local extrajo texto. Revisa e ingresa/ajusta cada línea; lectura de tablas depende del formato.")
-     else:
-      data=openai_extract(item["bytes"],name)
-      item["supplier"]=data.get("proveedor",""); item["number"]=data.get("numero","")
-      try: item["date"]=date.fromisoformat(data.get("fecha",""))
-      except: pass
-      item["items"]=data.get("productos",[])
-      st.success("Lectura asistida lista. Confirma cada campo.")
-    except Exception as e:
-     st.error("No se pudo leer. Comprueba Tesseract (idiomas spa+eng) o la clave OPENAI_API_KEY. Detalle: "+str(e)[:300])
-   if item["raw"]:
-    with st.expander("Texto OCR local"): st.text(item["raw"])
+   if item.get("dte"):
+    st.success("XML DTE leído localmente desde los datos estructurados del SII.")
+    if item.get("total"): st.caption(f"Total declarado en el documento: $ {item['total']}")
+   else:
+    engine=st.radio("Lectura",["OCR local (Tesseract)","OpenAI opcional"],horizontal=False,key="engine"+name)
+    if st.button("Leer documento",key="ocr"+name):
+     try:
+      if engine=="OCR local (Tesseract)":
+       text=local_ocr(item["bytes"],name); item["raw"]=text
+       item["supplier"]=item["supplier"] or (text.splitlines()[0][:100] if text.strip() else "")
+       st.warning("OCR extrajo texto. Revisa los campos y las líneas manualmente.")
+      else:
+       data=openai_extract(item["bytes"],name)
+       item["supplier"]=data.get("proveedor",""); item["number"]=data.get("numero","")
+       try: item["date"]=date.fromisoformat(data.get("fecha",""))
+       except: pass
+       item["items"]=data.get("productos",[])
+       st.success("Lectura asistida lista. Confirma cada campo.")
+     except Exception as e:
+      st.error("No se pudo leer. Comprueba el motor local o la clave OPENAI_API_KEY. Detalle: "+str(e)[:300])
+    if item["raw"]:
+     with st.expander("Texto OCR local"): st.text(item["raw"])
   with y:
    st.subheader("Revisión editable")
    item["supplier"]=st.text_input("Proveedor",item["supplier"],key="s"+name)
@@ -99,23 +114,29 @@ elif page=="Revisar documentos":
    for i,r in enumerate(item["items"]):
     aa,bb,cc=st.columns([3,1,1.3])
     with aa: nm=st.text_input(f"Producto {i+1}",r.get("nombre",""),key=f"nm{name}{i}")
-    with bb: qty=st.number_input("Unidades",1,100000,int(r.get("cantidad") or 1),key=f"qt{name}{i}")
+    with bb: qty=st.number_input("Unidades (enteras)",0.0,100000.0,float(r.get("cantidad") or 1),step=1.0,key=f"qt{name}{i}")
     with cc: cost=st.number_input("Costo unitario",0,100000000,int(r.get("costo_unitario") or 0),key=f"cs{name}{i}")
     changed.append({"nombre":nm,"cantidad":qty,"costo_unitario":cost})
    item["items"]=changed
    if st.button("＋ Agregar línea",key="add"+name): item["items"].append({"nombre":"","cantidad":1,"costo_unitario":0}); st.rerun()
    if st.button("Confirmar documento e ingresar al stock",type="primary",key="ok"+name):
     if not all(r["nombre"].strip() for r in changed): st.error("Completa el nombre de cada producto.")
+    elif any(float(r["cantidad"]) % 1 for r in changed): st.error("El inventario usa unidades enteras. Corrige cantidades fraccionarias antes de confirmar.")
     else:
-     rid=con.execute("insert into receipts(supplier,invoice_no,doc_date,filename) values(?,?,?,?)",(item["supplier"],item["number"],str(item["date"]),name)).lastrowid
-     for r in changed:
-      row=con.execute("select id from products where name=?",(r["nombre"].strip(),)).fetchone()
-      if not row:
-       con.execute("insert into products(name,stock,cost) values(?,?,?)",(r["nombre"].strip(),0,r["costo_unitario"]))
+     prior=con.execute("select id from receipts where supplier=? and invoice_no=?",(item["supplier"],item["number"])).fetchone() if item["number"] else None
+     if prior: st.error("Este proveedor y folio ya están registrados; no se modificó el stock.")
+     else:
+      rid=con.execute("insert into receipts(supplier,invoice_no,doc_date,filename) values(?,?,?,?)",(item["supplier"],item["number"],str(item["date"]),item.get("source_name",name))).lastrowid
+      for r in changed:
        row=con.execute("select id from products where name=?",(r["nombre"].strip(),)).fetchone()
-      con.execute("update products set stock=stock+?,cost=? where id=?",(r["cantidad"],r["costo_unitario"],row["id"]))
-      con.execute("insert into movements(product_id,receipt_id,quantity,unit_cost) values(?,?,?,?)",(row["id"],rid,r["cantidad"],r["costo_unitario"]))
-     (DOCS/name).write_bytes(item["bytes"]); con.commit(); del q[name]; st.success("Confirmado; stock actualizado."); st.rerun()
+       if not row:
+        con.execute("insert into products(name,stock,cost) values(?,?,?)",(r["nombre"].strip(),0,r["costo_unitario"]))
+        row=con.execute("select id from products where name=?",(r["nombre"].strip(),)).fetchone()
+       con.execute("update products set stock=stock+?,cost=? where id=?",(int(r["cantidad"]),r["costo_unitario"],row["id"]))
+       con.execute("insert into movements(product_id,receipt_id,quantity,unit_cost) values(?,?,?,?)",(row["id"],rid,int(r["cantidad"]),r["costo_unitario"]))
+      import uuid
+      (DOCS/(uuid.uuid4().hex+"_"+Path(item.get("source_name",name)).name)).write_bytes(item["bytes"])
+      con.commit(); del q[name]; st.success("Confirmado; stock actualizado."); st.rerun()
    if st.button("Eliminar de la bandeja",key="del"+name): del q[name]; st.rerun()
  else: st.info("Selecciona uno o más documentos para empezar.")
 elif page=="Productos":
