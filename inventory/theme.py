@@ -5,7 +5,7 @@ import streamlit as st
 def apply_brand():
     st.set_page_config(
         page_title="Gioval · Inventario", page_icon=":material/inventory_2:",
-        layout="wide", initial_sidebar_state="collapsed",
+        layout="wide", initial_sidebar_state="expanded",
     )
     st.markdown("""
     <style>
@@ -34,3 +34,4 @@ def page_header(title: str, description: str):
     st.markdown('<div class="gioval-eyebrow">GIOVAL · OPERACIONES</div>', unsafe_allow_html=True)
     st.title(title)
     st.caption(description)
+
