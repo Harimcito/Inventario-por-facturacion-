@@ -20,6 +20,14 @@ El SII permite generar un respaldo XML de DTE recibidos. Descárgalo desde su po
 
 La base SQLite y documentos originales se guardan en local y están excluidos de Git.
 
+## Uso diario
+
+- En **Ingresar compras** puedes revisar cada factura por separado, asociar sus líneas a productos existentes y confirmar solo cuando los datos estén correctos.
+- **Facturas** permite buscar por proveedor o folio, consultar las líneas reconocidas y descargar el original. Las repetidas quedan identificadas y no aumentan stock.
+- En **Productos** cada producto tiene margen y mínimo de stock propio. Los cambios manuales de unidades requieren un motivo y quedan auditados en **Movimientos**.
+- **Respaldo y exportación** permite descargar el catálogo como CSV y una copia ZIP de la base de datos más los documentos originales. Guarda ese ZIP en otro lugar seguro.
+
 ## Facturas duplicadas y nombres
 
 La app compara proveedor/RUT, tipo DTE y folio. Si encuentra una factura repetida, permite archivarla como repetida: guarda el archivo y su referencia al registro original, sin crear movimientos ni aumentar stock. Las lecturas XML y OpenAI limpian signos `?` incrustados y secuencias de letras separadas. En Productos hay una vista previa para corregir nombres ya guardados; los conflictos con productos existentes se dejan sin cambio.
+
