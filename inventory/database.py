@@ -34,7 +34,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
       line_number INTEGER NOT NULL, original_description TEXT NOT NULL,
       product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
       quantity INTEGER NOT NULL, unit_cost INTEGER NOT NULL,
-      line_total INTEGER NOT NULL DEFAULT 0
+      line_total INTEGER NOT NULL DEFAULT 0, line_type TEXT NOT NULL DEFAULT 'Mercadería'
     );
     CREATE TABLE IF NOT EXISTS inventory_adjustments(
       id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id),
@@ -47,6 +47,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
     receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(receipts)")}
     migrations = {
         "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"),),
+        "receipt_lines": (("line_type", "TEXT NOT NULL DEFAULT 'Mercadería'"),),
         "receipts": (("rut", "TEXT DEFAULT ''"), ("doc_type", "TEXT DEFAULT ''"),
                      ("duplicate_of", "INTEGER"), ("total_amount", "TEXT DEFAULT ''"),
                      ("stored_filename", "TEXT DEFAULT ''")),
@@ -102,9 +103,9 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
         raise ValueError("La factura repetida no coincide con el documento original registrado.")
     if duplicate_of is None:
         if not items or any(not str(i.get("nombre", "")).strip() for i in items):
-            raise ValueError("Completa el nombre de todos los productos.")
-        if any(int(i["cantidad"]) <= 0 for i in items):
-            raise ValueError("Las unidades deben ser mayores que cero.")
+            raise ValueError("Completa la descripción de cada línea de la factura.")
+        if any(str(i.get("line_type", "Mercadería")) == "Mercadería" and int(i["cantidad"]) <= 0 for i in items):
+            raise ValueError("Las unidades de mercadería deben ser mayores que cero.")
 
     document_path.parent.mkdir(parents=True, exist_ok=True)
     with document_path.open("xb") as output:
@@ -124,8 +125,13 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                 if not name:
                     raise ValueError("El nombre del producto quedó vacío después de limpiarlo.")
                 qty, cost = int(item["cantidad"]), int(item.get("costo_unitario", 0))
+                line_type = str(item.get("line_type", "Mercadería"))
+                if line_type not in {"Mercadería", "Servicio tecnológico/profesional", "Flete o despacho", "Comisión o recargo", "Impuesto, descuento u otro ajuste"}:
+                    raise ValueError("Tipo de línea de factura no reconocido.")
                 product_id = item.get("product_id")
-                if product_id:
+                if line_type != "Mercadería":
+                    product_id = None
+                elif product_id:
                     product = con.execute("SELECT id FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
                     if not product:
                         raise ValueError("El producto seleccionado ya no está disponible.")
@@ -134,10 +140,10 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                     con.execute("INSERT OR IGNORE INTO products(name,stock,cost) VALUES(?,0,?)", (name, cost))
                     product_id = con.execute("SELECT id FROM products WHERE name=?", (name,)).fetchone()["id"]
                 con.execute("""INSERT INTO receipt_lines
-                    (receipt_id,line_number,original_description,product_id,quantity,unit_cost,line_total)
-                    VALUES(?,?,?,?,?,?,?)""",
-                    (receipt_id, line_number, name, product_id, qty, cost, qty * cost))
-                if duplicate_of is None:
+                    (receipt_id,line_number,original_description,product_id,quantity,unit_cost,line_total,line_type)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (receipt_id, line_number, name, product_id, qty, cost, qty * cost, line_type))
+                if duplicate_of is None and line_type == "Mercadería":
                     con.execute("UPDATE products SET stock=stock+?, cost=? WHERE id=?", (qty, cost, product_id))
                     con.execute(
                         "INSERT INTO movements(product_id,receipt_id,quantity,unit_cost) VALUES(?,?,?,?)",
