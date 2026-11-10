@@ -19,3 +19,7 @@ El SII permite generar un respaldo XML de DTE recibidos. Descárgalo desde su po
 3. Abre `abrir_inventario.ps1`. El iniciador busca un puerto libre entre 8506 y 8599; el 8501 queda reservado para Giovalia.
 
 La base SQLite y documentos originales se guardan en local y están excluidos de Git.
+
+## Facturas duplicadas y nombres
+
+La app compara proveedor/RUT, tipo DTE y folio. Si encuentra una factura repetida, permite archivarla como repetida: guarda el archivo y su referencia al registro original, sin crear movimientos ni aumentar stock. Las lecturas XML y OpenAI limpian signos `?` incrustados y secuencias de letras separadas. En Productos hay una vista previa para corregir nombres ya guardados; los conflictos con productos existentes se dejan sin cambio.
