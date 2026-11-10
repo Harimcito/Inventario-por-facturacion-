@@ -1,6 +1,7 @@
 """Vistas Streamlit; las reglas de negocio permanecen en servicios separados."""
 import uuid
 import sqlite3
+from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import date
 import streamlit as st
@@ -9,6 +10,7 @@ from inventory.database import find_duplicate, record_receipt, update_product
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key
 from inventory.theme import page_header
 from inventory.text import clean_product_name
+from inventory.classifier import classify_line, LINE_TYPES, MERCHANDISE
 
 
 def dashboard(con):
@@ -50,7 +52,7 @@ def _add_uploads(uploads, queue):
 
 
 def documents(con, docs_dir: Path):
-    page_header("Ingresar compras", "Carga varios documentos y valida cada detalle antes de sumar unidades al stock.")
+    page_header("Ingresar facturas", "Revisa y clasifica cada línea antes de actualizar el inventario.")
     with st.expander("Conectar con el SII", expanded=False):
         st.markdown("**Importación oficial de facturas recibidas**")
         st.write("El SII permite generar un archivo de respaldo XML con DTE recibidos. Descárgalo en el portal y súbelo aquí: cada factura se separará para revisar sus productos.")
@@ -135,29 +137,54 @@ def documents(con, docs_dir: Path):
         doc_date = st.date_input("Fecha de emisión", value=item["date"], key=f"date_{selected}")
         rows = item.get("items") or [{"nombre": "", "cantidad": 1, "costo_unitario": 0}]
         item["items"] = rows
-        st.markdown("**Productos recibidos**")
+        st.markdown("**Líneas de la factura**")
+        st.caption("La app sugiere qué líneas son mercadería. Servicios, comisiones y fletes se guardan en la factura, pero no crean productos ni aumentan el stock.")
         if any(float(row.get("cantidad") or 0) % 1 for row in rows):
             st.warning("El XML incluye una cantidad fraccionaria. Ajusta manualmente las unidades completas antes de confirmar.")
         edited = []
         catalog = con.execute("SELECT id,name FROM products WHERE active=1 ORDER BY name").fetchall()
         for index, row in enumerate(rows):
             with st.container(border=True):
-                c1, c2, c3 = st.columns([2, .72, 1])
-                name = c1.text_input("Descripción de factura", row.get("nombre", ""), key=f"name_{selected}_{index}")
-                quantity = c2.number_input("Unidades", min_value=0, max_value=100000,
+                name = st.text_input("Descripción de factura", row.get("nombre", ""), key=f"name_{selected}_{index}")
+                suggested_type, reason = classify_line(name)
+                saved_type = row.get("line_type", suggested_type)
+                selected_type = st.selectbox("Clasificación", LINE_TYPES,
+                    index=LINE_TYPES.index(saved_type) if saved_type in LINE_TYPES else LINE_TYPES.index(suggested_type),
+                    key=f"line_type_{selected}_{index}",
+                    help="Solo las líneas clasificadas como Mercadería afectan el inventario.")
+                if selected_type == suggested_type:
+                    st.caption(f"Sugerencia automática: {suggested_type}. {reason}")
+                else:
+                    st.caption(f"Clasificación modificada manualmente. La sugerencia por descripción era: {suggested_type}.")
+                c1, c2 = st.columns([.8, 1.2])
+                quantity = c1.number_input("Unidades/cantidad", min_value=0, max_value=100000,
                     value=max(0, int(float(row.get("cantidad") or 1))), step=1, key=f"qty_{selected}_{index}")
-                cost = c3.number_input("Costo unitario", min_value=0, max_value=100000000,
+                cost = c2.number_input("Valor unitario", min_value=0, max_value=100000000,
                     value=max(0, int(float(row.get("costo_unitario") or 0))), step=100, key=f"cost_{selected}_{index}")
-                options = [None] + [p["id"] for p in catalog]
-                default_id = row.get("product_id")
-                if default_id not in options:
-                    exact = next((p["id"] for p in catalog if clean_product_name(p["name"]).casefold() == clean_product_name(name).casefold()), None)
-                    default_id = exact
-                mapping = st.selectbox("Asociar al producto del inventario", options,
-                    index=options.index(default_id) if default_id in options else 0,
-                    format_func=lambda pid: "Crear producto del catálogo automáticamente" if pid is None else next(p["name"] for p in catalog if p["id"] == pid),
-                    key=f"mapping_{selected}_{index}")
-                edited.append({"nombre": name, "cantidad": quantity, "costo_unitario": cost, "product_id": mapping})
+                mapping = None
+                if selected_type == MERCHANDISE:
+                    normalized_name = clean_product_name(name).casefold()
+                    ranked = sorted(catalog, key=lambda p: SequenceMatcher(None, normalized_name,
+                        clean_product_name(p["name"]).casefold()).ratio(), reverse=True)
+                    possible = [p for p in ranked if normalized_name and SequenceMatcher(None, normalized_name,
+                        clean_product_name(p["name"]).casefold()).ratio() >= .68][:3]
+                    if possible:
+                        st.caption("Posibles coincidencias: " + " · ".join(p["name"] for p in possible) + ". Confirma la correcta en el selector.")
+                    options = [None] + [p["id"] for p in ranked]
+                    default_id = row.get("product_id")
+                    if default_id not in options:
+                        exact = next((p["id"] for p in catalog if clean_product_name(p["name"]).casefold() == normalized_name), None)
+                        default_id = exact
+                    mapping = st.selectbox("Asociar al producto del inventario", options,
+                        index=options.index(default_id) if default_id in options else 0,
+                        format_func=lambda pid: "Crear producto del catálogo automáticamente" if pid is None else next(p["name"] for p in catalog if p["id"] == pid),
+                        key=f"mapping_{selected}_{index}")
+                    if mapping is None:
+                        st.caption("Si confirmas, esta línea creará un producto nuevo en el catálogo.")
+                else:
+                    st.info("Se conservará en el detalle de la factura y no se ingresará al stock.")
+                edited.append({"nombre": name, "cantidad": quantity, "costo_unitario": cost,
+                               "product_id": mapping, "line_type": selected_type})
         item["supplier"], item["number"], item["date"], item["items"] = supplier, number, doc_date, edited
         add, remove = st.columns(2)
         if add.button("＋ Agregar producto", key=f"add_{selected}"):
@@ -183,16 +210,18 @@ def documents(con, docs_dir: Path):
             if discard_duplicate.button("Descartar copia", key=f"discard_duplicate_{selected}"):
                 del queue[selected]
                 st.rerun()
-        elif st.button("Confirmar compra y actualizar stock", type="primary", key=f"confirm_{selected}"):
+        elif st.button("Confirmar factura", type="primary", key=f"confirm_{selected}"):
             try:
                 if any(not row["nombre"].strip() for row in edited):
                     raise ValueError("Completa el nombre de cada producto.")
-                if any(row["cantidad"] <= 0 for row in edited):
-                    raise ValueError("Las unidades deben ser mayores que cero.")
+                if any(row["line_type"] == MERCHANDISE and row["cantidad"] <= 0 for row in edited):
+                    raise ValueError("Las unidades de mercadería deben ser mayores que cero.")
                 path = docs_dir / f"{uuid.uuid4().hex}_{Path(item['source_name']).name}"
                 record_receipt(con, item, edited, path)
                 del queue[selected]
-                st.success("Compra confirmada y stock actualizado.")
+                merchandise_count = sum(row["line_type"] == MERCHANDISE for row in edited)
+                other_count = len(edited) - merchandise_count
+                st.success(f"Factura guardada. {merchandise_count} línea(s) de mercadería ingresaron al inventario; {other_count} línea(s) de servicios o cargos quedaron solo en el detalle.")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
