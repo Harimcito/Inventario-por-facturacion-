@@ -15,7 +15,7 @@ El SII permite generar un archivo XML de respaldo desde Historial de DTE recibid
 1. Instala Python 3.10 o superior.
 2. Para imagen/PDF local, instala Tesseract OCR con español e inglés y verifica que `tesseract` esté en PATH.
 3. Ejecuta `pip install -r requirements.txt`.
-4. Ejecuta `streamlit run app.py`.
+4. Abre `abrir_inventario.ps1` para iniciar la app en un puerto local libre entre 8506 y 8599 (8501 queda reservado para Giovalia). También puedes ejecutar `streamlit run app.py --server.port 8506`.
 
 ## Revisar y confirmar
 
