@@ -24,7 +24,7 @@ def apply_brand():
       [data-testid="stExpander"] { background:#fff; border:1px solid #DCE3ED; border-radius:10px; }
       .stButton button[kind="primary"] { background:var(--gioval-blue); border-color:var(--gioval-blue); }
       .stButton button { border-radius:6px; }
-      .gioval-eyebrow { color:var(--gioval-blue); font-size:.75rem; font-weight:700; letter-spacing:.12em; text-transform:uppercase; margin-bottom:.25rem; }
+      .gioval-eyebrow { color:var(--gioval-blue)!important; background:#E9EDFF; display:inline-flex; padding:.25rem .55rem; border-radius:4px; font-size:.72rem; font-weight:750; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.45rem; opacity:1!important; }
       @media(max-width:700px) { .block-container { padding:1.2rem .85rem 2rem; } }
     </style>
     """, unsafe_allow_html=True)
