@@ -10,6 +10,7 @@ import pypdfium2 as pdfium
 import pytesseract
 
 from sii_xml import parse_dtes
+from inventory.text import clean_product_name
 
 
 def document_images(data: bytes, filename: str):
@@ -52,7 +53,12 @@ def ai_extract(data: bytes, filename: str, api_key: str):
         model="gpt-4o-mini", messages=[{"role": "user", "content": contents}],
         response_format={"type": "json_object"}, max_tokens=3000,
     )
-    return json.loads(result.choices[0].message.content)
+    data = json.loads(result.choices[0].message.content)
+    data["productos"] = [
+        {**item, "nombre": clean_product_name(item.get("nombre", ""))}
+        for item in data.get("productos", [])
+    ]
+    return data
 
 
 def drafts_from_upload(filename: str, data: bytes):
@@ -66,7 +72,10 @@ def drafts_from_upload(filename: str, data: bytes):
             drafts.append({
                 "bytes": data, "source_name": filename,
                 "supplier": dte["proveedor"], "number": dte["numero"],
-                "date": doc_date, "items": dte["productos"], "raw": "",
+                "date": doc_date,
+                "items": [{**item, "nombre": clean_product_name(item.get("nombre", ""))}
+                          for item in dte["productos"]],
+                "raw": "",
                 "dte": True, "total": dte["total"], "rut": dte["rut"], "kind": dte["tipo"],
             })
         return drafts
