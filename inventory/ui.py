@@ -6,32 +6,42 @@ from pathlib import Path
 from datetime import date
 import streamlit as st
 
-from inventory.database import find_duplicate, record_receipt, update_product
+from inventory.database import find_duplicate, record_receipt, update_product, set_product_classification
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key
 from inventory.theme import page_header
-from inventory.text import clean_product_name, normalize_product_key
-from inventory.classifier import classify_line, LINE_TYPES, MERCHANDISE
+from inventory.text import clean_product_name, normalize_product_key, display_product_name
+from inventory.classifier import classify_line, suggest_product_category, LINE_TYPES, MERCHANDISE
 
 
 def dashboard(con):
-    products = con.execute("SELECT * FROM products WHERE active=1 ORDER BY name").fetchall()
+    products = con.execute("SELECT * FROM products WHERE active=1 AND item_type='Mercadería' ORDER BY name").fetchall()
     receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL").fetchone()["n"]
     duplicates = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NOT NULL").fetchone()["n"]
+    excluded = con.execute("SELECT COUNT(*) AS n FROM products WHERE active=1 AND item_type<>'Mercadería'").fetchone()["n"]
     page_header("Inventario de mercadería", "Compras recibidas, unidades disponibles y precios sugeridos.")
     a, b, c, d = st.columns(4)
     a.metric("Productos activos", len(products))
     b.metric("Unidades en stock", sum(p["stock"] for p in products))
     c.metric("Facturas registradas", receipts)
     d.metric("Repetidas archivadas", duplicates)
+    if excluded:
+        st.caption(f"{excluded} servicios, comisiones y ajustes se conservan en sus facturas, fuera del stock.")
     low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
     if low_stock:
         st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
     st.subheader("Stock actual")
     if products:
-        st.dataframe([{"Producto": p["name"], "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Stock mínimo": p["min_stock"],
+        s1, s2 = st.columns([2, 1])
+        search = s1.text_input("Buscar producto", placeholder="Nombre, marca o variante", key="dashboard_product_search")
+        categories = sorted({p["category"] for p in products if p["category"]})
+        category = s2.selectbox("Categoría", ["Todas"] + categories, key="dashboard_product_category")
+        visible = [p for p in products if (not search or search.casefold() in (p["name"] + " " + (p["description"] or "")).casefold())
+                   and (category == "Todas" or p["category"] == category)]
+        st.caption(f"Mostrando {len(visible)} de {len(products)} productos inventariables")
+        st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Stock mínimo": p["min_stock"],
             "Costo unitario": f"$ {p['cost']:,}".replace(",", "."), "Margen": f"{p['margin']:g}%",
             "Precio sugerido": f"$ {round(p['cost']*(1+p['margin']/100)):,}".replace(",", ".")}
-            for p in products], use_container_width=True, hide_index=True)
+            for p in visible], use_container_width=True, hide_index=True)
     else:
         st.info("Tu catálogo aparecerá aquí cuando confirmes una factura o agregues un producto.")
 
@@ -142,7 +152,7 @@ def documents(con, docs_dir: Path):
         if any(float(row.get("cantidad") or 0) % 1 for row in rows):
             st.warning("El XML incluye una cantidad fraccionaria. Ajusta manualmente las unidades completas antes de confirmar.")
         edited = []
-        catalog = con.execute("SELECT id,name,category,description FROM products WHERE active=1 ORDER BY name").fetchall()
+        catalog = con.execute("SELECT id,name,category,description FROM products WHERE active=1 AND item_type='Mercadería' ORDER BY name").fetchall()
         alias_rows = con.execute("SELECT product_id,alias,alias_key FROM product_aliases").fetchall()
         aliases_by_product = {}
         for alias in alias_rows:
@@ -263,11 +273,47 @@ def products(con):
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar: {exc}")
-    rows = con.execute("SELECT * FROM products WHERE active=1 ORDER BY name").fetchall()
+    all_active = con.execute("SELECT * FROM products WHERE active=1 ORDER BY name").fetchall()
+    uncategorized = [(p, suggest_product_category(p["name"])) for p in all_active
+                     if p["item_type"] == MERCHANDISE and not p["category"] and suggest_product_category(p["name"])]
+    if uncategorized:
+        with st.expander(f"Completar categorías del catálogo ({len(uncategorized)})", expanded=False):
+            st.dataframe([{"Producto": display_product_name(p["name"]), "Categoría sugerida": category}
+                          for p, category in uncategorized], use_container_width=True, hide_index=True)
+            if st.button("Aplicar categorías sugeridas", key="apply_product_categories"):
+                with con:
+                    for p, category in uncategorized:
+                        con.execute("UPDATE products SET category=? WHERE id=? AND (category IS NULL OR category='')",
+                                    (category, p["id"]))
+                st.rerun()
+    suggested = [(p, *classify_line(p["name"])) for p in all_active
+                 if p["item_type"] == MERCHANDISE and classify_line(p["name"])[0] != MERCHANDISE]
+    if suggested:
+        with st.expander(f"Revisar conceptos que parecen servicios o cargos ({len(suggested)})", expanded=True):
+            st.caption("La app conserva la factura, pero estos conceptos no deberían contar como mercadería. Aplicar la sugerencia deja su saldo en cero y registra el ajuste.")
+            st.dataframe([{"Descripción detectada": display_product_name(p["name"]), "Tipo sugerido": kind,
+                "Unidades a retirar del stock": p["stock"], "Motivo": reason} for p, kind, reason in suggested],
+                use_container_width=True, hide_index=True)
+            if st.button(f"Aplicar las sugerencias a {len(suggested)} concepto(s)", type="primary", key="classify_existing_nonstock"):
+                for p, kind, _ in suggested:
+                    set_product_classification(con, p["id"], kind)
+                st.success("Conceptos reclasificados. Sus facturas y ajustes quedaron en el historial.")
+                st.rerun()
+    noninventory = [p for p in all_active if p["item_type"] != MERCHANDISE]
+    if noninventory:
+        with st.expander(f"Conceptos excluidos del inventario ({len(noninventory)})", expanded=False):
+            st.dataframe([{"Descripción": display_product_name(p["name"]), "Clasificación": p["item_type"]}
+                          for p in noninventory], use_container_width=True, hide_index=True)
+            selected_noninventory = st.selectbox("Reincorporar como mercadería", noninventory,
+                format_func=lambda p: display_product_name(p["name"]), key="reinclude_noninventory")
+            if st.button("Reincorporar al inventario", key="reinclude_inventory_item"):
+                set_product_classification(con, selected_noninventory["id"], MERCHANDISE)
+                st.rerun()
+    rows = [p for p in all_active if p["item_type"] == MERCHANDISE]
     if not rows:
-        st.info("Todavía no hay productos en el catálogo.")
+        st.info("Todavía no hay mercadería en el catálogo. Puedes agregar productos o reincorporar uno excluido.")
         return
-    proposals = [(p["id"], p["name"], clean_product_name(p["name"])) for p in rows]
+    proposals = [(p["id"], p["name"], display_product_name(p["name"])) for p in rows]
     changes = [(pid, old, new) for pid, old, new in proposals if old != new]
     if changes:
         proposed_counts = {}
@@ -291,11 +337,11 @@ def products(con):
                         con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
                 st.success("Descripciones corregidas sin cambiar stock ni movimientos.")
                 st.rerun()
-    st.dataframe([{"Producto": p["name"], "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
+    st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
         "Costo": p["cost"], "Margen %": p["margin"], "Precio sugerido": round(p["cost"] * (1 + p["margin"] / 100))}
         for p in rows], use_container_width=True, hide_index=True)
     with st.expander("Editar producto"):
-        product = st.selectbox("Producto", rows, format_func=lambda p: p["name"])
+        product = st.selectbox("Producto", rows, format_func=lambda p: display_product_name(p["name"]))
         with st.form(f"edit_{product['id']}"):
             name = st.text_input("Nombre del producto", product["name"])
             category = st.text_input("Categoría", product["category"] or "")
@@ -325,7 +371,8 @@ def products(con):
 def movements(con):
     page_header("Movimientos", "Historial de compras confirmadas y cambios de stock.")
     rows = con.execute("""SELECT m.created_at,p.name,r.supplier,r.invoice_no,r.filename,m.quantity,m.unit_cost
-        FROM movements m JOIN products p ON p.id=m.product_id JOIN receipts r ON r.id=m.receipt_id ORDER BY m.id DESC""").fetchall()
+        FROM movements m JOIN products p ON p.id=m.product_id JOIN receipts r ON r.id=m.receipt_id
+        WHERE p.item_type='Mercadería' ORDER BY m.id DESC""").fetchall()
     if rows:
         st.dataframe([dict(row) for row in rows], use_container_width=True, hide_index=True)
     else:
@@ -365,10 +412,13 @@ def receipts(con, docs_dir: Path):
         "Total": r["total_amount"], "Archivo": r["filename"]} for r in rows], use_container_width=True, hide_index=True)
     choice = st.selectbox("Ver detalle de factura", rows,
         format_func=lambda r: f"{r['doc_date']} · {r['supplier']} · Folio {r['invoice_no']}" + (" · REPETIDA" if r["duplicate_of"] else ""))
-    lines = con.execute("""SELECT l.line_number,l.original_description,p.name AS producto,l.quantity,l.unit_cost,l.line_total
+    lines = con.execute("""SELECT l.line_number,l.original_description,l.line_type,p.name AS producto,l.quantity,l.unit_cost,l.line_total
         FROM receipt_lines l LEFT JOIN products p ON p.id=l.product_id WHERE l.receipt_id=? ORDER BY l.line_number""", (choice["id"],)).fetchall()
     if lines:
-        st.dataframe([dict(x) for x in lines], use_container_width=True, hide_index=True)
+        st.dataframe([{"Línea": x["line_number"], "Descripción factura": display_product_name(x["original_description"]),
+            "Clasificación": x["line_type"], "Producto del catálogo": display_product_name(x["producto"]) if x["producto"] else "—",
+            "Cantidad": x["quantity"], "Valor unitario": x["unit_cost"], "Total línea": x["line_total"]}
+            for x in lines], use_container_width=True, hide_index=True)
     file_path = docs_dir / (choice["stored_filename"] or "")
     if file_path.is_file():
         st.download_button("Descargar documento original", file_path.read_bytes(), file_name=choice["filename"] or file_path.name)
@@ -383,7 +433,7 @@ def exports(con, root: Path):
     products = con.execute("""SELECT p.name,p.description,p.category,p.stock,p.min_stock,p.cost,p.margin,
         ROUND(p.cost*(1+p.margin/100)) AS suggested,
         (SELECT group_concat(alias, '; ') FROM product_aliases a WHERE a.product_id=p.id) AS aliases
-        FROM products p WHERE p.active=1 ORDER BY p.name""").fetchall()
+        FROM products p WHERE p.active=1 AND p.item_type='Mercadería' ORDER BY p.name""").fetchall()
     out = io.StringIO(); writer = csv.writer(out)
     writer.writerow(["Producto", "Descripción", "Categoría", "Nombres alternativos", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
     writer.writerows([(row["name"], row["description"], row["category"], row["aliases"], row["stock"],
@@ -404,4 +454,5 @@ def exports(con, root: Path):
     if "inventory_backup" in st.session_state:
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         st.download_button("Descargar respaldo ZIP", st.session_state["inventory_backup"], f"respaldo_inventario_{stamp}.zip", "application/zip")
+
 
