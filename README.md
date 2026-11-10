@@ -10,7 +10,7 @@ Aplicación Streamlit para revisar compras, registrar stock por unidades y mante
 
 El SII permite generar un archivo XML de respaldo desde Historial de DTE recibidos: [guía oficial](https://www.sii.cl/destacados/factura_electronica/guias_ayuda/como_generar_archivo_respaldo.htm). Descarga ese respaldo y cárgalo en Documentos de compra. No hace falta entregar la Clave Tributaria a esta app.
 
-## Ejecutar en Windows
+## Estructura\n\nLa interfaz principal está en `app.py`; persistencia/transacciones en `inventory/database.py`; lectores XML, OCR e IA en `inventory/readers.py`; vistas en `inventory/ui.py`; y la identidad visual en `inventory/theme.py`.\n\n## SII y lectura con IA\n\nEl SII ofrece una descarga oficial de respaldo XML de DTE recibidos. La app importa ese respaldo, separa cada factura y permite validar los productos antes de confirmar stock. No existe una API pública documentada para sincronizar automáticamente todo el buzón de compras; las conexiones de servicios web del SII requieren autenticación/certificado digital. Por seguridad, esta app no solicita ni almacena Clave Tributaria.\n\nPara PDF e imágenes, configura `OPENAI_API_KEY` en el equipo o introdúcela en la pantalla de compras (se conserva solo durante la sesión). El XML se procesa localmente.\n\n## Ejecutar en Windows
 
 1. Instala Python 3.10 o superior.
 2. Para imagen/PDF local, instala Tesseract OCR con español e inglés y verifica que `tesseract` esté en PATH.
