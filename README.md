@@ -24,6 +24,7 @@ La base SQLite y documentos originales se guardan en local y están excluidos de
 
 - En **Ingresar facturas** puedes revisar cada documento, asociar sus líneas de mercadería a productos existentes y confirmar cuando los datos estén correctos.
 - El clasificador sugiere separar mercadería, servicios tecnológicos/profesionales, fletes, comisiones y ajustes. Solo **Mercadería** crea o actualiza productos y stock; las demás líneas se conservan dentro del detalle de la factura. Revisa la sugerencia y cámbiala si hace falta antes de confirmar.
+- La ficha de producto incluye una descripción breve para formato o variante y nombres alternativos de proveedores. Al asociar una línea de factura a un producto existente, la descripción del proveedor se aprende como alias para sugerir la misma coincidencia la próxima vez.
 - **Facturas** permite buscar por proveedor o folio, consultar las líneas reconocidas y descargar el original. Las repetidas quedan identificadas y no aumentan stock.
 - En **Productos** cada producto tiene margen y mínimo de stock propio. Los cambios manuales de unidades requieren un motivo y quedan auditados en **Movimientos**.
 - **Respaldo y exportación** permite descargar el catálogo como CSV y una copia ZIP de la base de datos más los documentos originales. Guarda ese ZIP en otro lugar seguro.
