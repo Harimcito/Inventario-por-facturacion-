@@ -40,7 +40,7 @@ def openai_extract(data,name):
  return json.loads(res.choices[0].message.content)
 
 st.set_page_config(page_title="Inventario Gioval",page_icon="📦",layout="wide")
-st.markdown("<style>.block-container{max-width:1280px;padding-top:1.5rem}[data-testid=stMetric]{background:#f3f6fa;padding:14px;border-radius:12px}section[data-testid=stSidebar]{background:#f7f9fc}</style>",unsafe_allow_html=True)
+st.markdown("<style>.block-container{max-width:1280px;padding:1.25rem 1.5rem 3rem}h1{font-size:clamp(1.65rem,4.2vw,2.25rem);line-height:1.15}[data-testid=stMetric]{background:rgba(128,128,128,.11);border:1px solid rgba(128,128,128,.24);padding:14px 16px;border-radius:14px}section[data-testid=stSidebar]{background:transparent}</style>",unsafe_allow_html=True)
 con=db()
 st.sidebar.title("📦 Inventario")
 page=st.sidebar.radio("Secciones",["Resumen","Revisar documentos","Productos","Movimientos"])
