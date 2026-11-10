@@ -6,8 +6,10 @@ import html
 
 def _repair_ocr_words(text: str) -> str:
     fixes = [
-        (r"comisi(?:on|[?\ufffd]n|n)", "comisión"),
-        (r"transacci(?:on|[?\ufffd]n|n)", "transacción"),
+        (r"comisi(?:ones|[?\ufffd]nes)", "comisiones"),
+        (r"\bcomisi(?:on|[?\ufffd]n|n)\b", "comisión"),
+        (r"transacci(?:ones|[?\ufffd]nes)", "transacciones"),
+        (r"\btransacci(?:on|[?\ufffd]n|n)\b", "transacción"),
         (r"d[?\ufffd]bito", "débito"),
         (r"cr[?\ufffd]dito", "crédito"),
         (r"m[?\ufffd]vil", "móvil"),
@@ -15,8 +17,8 @@ def _repair_ocr_words(text: str) -> str:
         (r"\ufffdptico", "óptico"),
         (r"ergon\ufffdmico", "ergonómico"),
         (r"inal\ufffdmbrico", "inalámbrico"),
-        (r"comision", "comisión"),
-        (r"transaccion", "transacción"),
+        (r"\bcomision\b", "comisión"),
+        (r"\btransaccion\b", "transacción"),
         (r"debito", "débito"),
         (r"credito", "crédito"),
         (r"telefonico", "telefónico"),
@@ -25,6 +27,13 @@ def _repair_ocr_words(text: str) -> str:
         (r"inalambrico", "inalámbrico"),
         (r"generica", "genérica"),
         (r"espaola", "española"),
+        (r"magntico", "magnético"),
+        (r"magnetico", "magnético"),
+        (r"metalico", "metálico"),
+        (r"plastico", "plástico"),
+        (r"lapiz", "lápiz"),
+        (r"elastico", "elástico"),
+        (r"deposito", "depósito"),
         (r"swicht\s*5", "Switch 5"),
     ]
     for pattern, replacement in fixes:
