@@ -1,10 +1,53 @@
 """Normalización conservadora de nombres de productos leídos de facturas."""
 import re
 import unicodedata
+import html
+
+
+def _repair_ocr_words(text: str) -> str:
+    fixes = [
+        (r"comisi(?:on|[?\ufffd]n|n)", "comisión"),
+        (r"transacci(?:on|[?\ufffd]n|n)", "transacción"),
+        (r"d[?\ufffd]bito", "débito"),
+        (r"cr[?\ufffd]dito", "crédito"),
+        (r"m[?\ufffd]vil", "móvil"),
+        (r"telef[?\ufffd]nico", "telefónico"),
+        (r"\ufffdptico", "óptico"),
+        (r"ergon\ufffdmico", "ergonómico"),
+        (r"inal\ufffdmbrico", "inalámbrico"),
+        (r"comision", "comisión"),
+        (r"transaccion", "transacción"),
+        (r"debito", "débito"),
+        (r"credito", "crédito"),
+        (r"telefonico", "telefónico"),
+        (r"optico", "óptico"),
+        (r"ergonomico", "ergonómico"),
+        (r"inalambrico", "inalámbrico"),
+        (r"generica", "genérica"),
+        (r"espaola", "española"),
+        (r"swicht\s*5", "Switch 5"),
+    ]
+    for pattern, replacement in fixes:
+        def preserve_case(match):
+            if match.group(0).isupper():
+                return replacement.upper()
+            if match.group(0)[:1].isupper():
+                return replacement.capitalize()
+            return replacement
+        text = re.sub(pattern, preserve_case, text, flags=re.IGNORECASE)
+    return text
 
 
 def clean_product_name(value: str) -> str:
     text = unicodedata.normalize("NFKC", str(value or ""))
+    for _ in range(3):
+        decoded = html.unescape(text)
+        if decoded == text:
+            break
+        text = decoded
+    text = _repair_ocr_words(text)
+    text = re.sub(r"(?<=[^\W\d_])\ufffd(?=[^\W\d_])", "", text, flags=re.UNICODE)
+    text = text.replace("\ufffd", " - ")
     text = re.sub(r"(?<=[^\W\d_])[?\ufffd](?=[^\W\d_])", "", text, flags=re.UNICODE)
     tokens = text.split()
     cleaned_tokens = []
@@ -40,6 +83,34 @@ def clean_product_name(value: str) -> str:
     text = re.sub(r"[\x00-\x1f\x7f]", " ", text)
     text = re.sub(r"\s+", " ", text).strip(" ?\ufffd")
     return text[:250]
+
+
+def display_product_name(value: str) -> str:
+    """Nombre legible para tablas, respetando códigos y siglas cortas."""
+    text = clean_product_name(value)
+    if not text:
+        return text
+    if not (text.isupper() or text.islower()):
+        connectors = {"de", "del", "la", "las", "el", "los", "en", "con", "por", "para", "y"}
+        parts = text.split()
+        text = " ".join(part.lower() if i and part.casefold().strip(".,;:") in connectors else part
+                         for i, part in enumerate(parts))
+        return re.sub(r"\b[a-zA-Z]{1,6}(?:-[a-zA-Z0-9]{1,8}){1,3}\b", lambda m: m.group(0).upper(), text)
+    keep_upper = {"USB", "DPI", "BT", "A3", "A4", "HDMI", "LED", "SSD", "RAM", "PC", "TV", "EQ", "HJS", "KL", "MT", "CM", "MM", "GR", "GRS", "COL", "MTS"}
+    connectors = {"de", "del", "la", "las", "el", "los", "en", "con", "por", "para", "y"}
+    def format_part(part: str) -> str:
+        if not part:
+            return part
+        if any(ch.isdigit() for ch in part) or part.upper() in keep_upper:
+            return part
+        if part.casefold() in connectors:
+            return part.casefold()
+        if part.isupper() and len(part) <= 3:
+            return part.lower() if part.casefold() in {"de", "del", "la", "las", "el", "los", "en", "con", "por", "para", "y"} else part
+        return part[:1].upper() + part[1:].lower()
+    text = re.sub(r"[A-Za-zÁÉÍÓÚÑÜáéíóúñü]+|[A-Za-z0-9][A-Za-z0-9+./-]*",
+                  lambda m: format_part(m.group(0)), text)
+    return re.sub(r"\b[a-zA-Z]{1,6}(?:-[a-zA-Z0-9]{1,8}){1,3}\b", lambda m: m.group(0).upper(), text)
 
 
 def normalize_product_key(value: str) -> str:
