@@ -123,6 +123,8 @@ def documents(con, docs_dir: Path):
         rows = item.get("items") or [{"nombre": "", "cantidad": 1, "costo_unitario": 0}]
         item["items"] = rows
         st.markdown("**Productos recibidos**")
+        if any(float(row.get("cantidad") or 0) % 1 for row in rows):
+            st.warning("El XML incluye una cantidad fraccionaria. Ajusta manualmente las unidades completas antes de confirmar.")
         edited = []
         for index, row in enumerate(rows):
             with st.container(border=True):
