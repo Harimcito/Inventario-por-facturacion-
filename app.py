@@ -54,8 +54,8 @@ if page=="Resumen":
  if ps: st.dataframe([{"Producto":p["name"],"Categoría":p["category"],"Stock":p["stock"],"Costo":p["cost"],"Margen %":p["margin"],"Precio sugerido":round(p["cost"]*(1+p["margin"]/100))} for p in ps],use_container_width=True,hide_index=True)
  else: st.info("Agrega productos desde Productos o desde la revisión de una compra.")
 elif page=="Revisar documentos":
- st.title("Facturas y boletas"); st.caption("Carga en lote. El OCR crea un borrador separado para cada archivo; revisa y confirma cada uno.")
- uploads=st.file_uploader("Selecciona varios PDF o imágenes",type=["pdf","png","jpg","jpeg","xml"],accept_multiple_files=True)
+ st.title("Facturas y boletas"); st.caption("Carga varios archivos. El XML del SII se separa por factura; PDF e imágenes se leen con OCR. Revisa cada documento antes de confirmarlo.")
+ uploads=st.file_uploader("Selecciona varios PDF, imágenes o XML del SII",type=["pdf","png","jpg","jpeg","xml"],accept_multiple_files=True)
  if uploads and st.button(f"Preparar {len(uploads)} documento(s)",type="primary"):
   q=st.session_state.setdefault("queue",{})
   for f in uploads:
