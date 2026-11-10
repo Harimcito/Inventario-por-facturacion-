@@ -27,6 +27,7 @@ La base SQLite y documentos originales se guardan en local y están excluidos de
 - La ficha de producto incluye una descripción breve para formato o variante y nombres alternativos de proveedores. Al asociar una línea de factura a un producto existente, la descripción del proveedor se aprende como alias para sugerir la misma coincidencia la próxima vez.
 - **Facturas** permite buscar por proveedor o folio, consultar las líneas reconocidas y descargar el original. Las repetidas quedan identificadas y no aumentan stock.
 - En **Productos** cada producto tiene margen y mínimo de stock propio. Los cambios manuales de unidades requieren un motivo y quedan auditados en **Movimientos**.
+- En **Productos**, las sugerencias ayudan a sacar servicios, comisiones y ajustes del stock sin borrar sus facturas. También se sugieren categorías para papelería, tecnología y herramientas; una reclasificación se puede revertir desde esa misma pantalla.
 - **Respaldo y exportación** permite descargar el catálogo como CSV y una copia ZIP de la base de datos más los documentos originales. Guarda ese ZIP en otro lugar seguro.
 
 ## Facturas duplicadas y nombres
