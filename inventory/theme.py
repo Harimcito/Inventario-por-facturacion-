@@ -14,7 +14,7 @@ def apply_brand():
       [data-testid="stHeader"] { background:rgba(245,247,251,.94); }
       [data-testid="stSidebar"] { background:#fff; border-right:1px solid #DCE3ED; }
       [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color:#475569; }
-      .block-container { max-width:1440px; padding:1.7rem clamp(1rem,3vw,2.5rem) 3rem; }
+      .block-container { max-width:1440px; padding:2.55rem clamp(1rem,3vw,2.5rem) 3rem; }
       h1,h2,h3 { color:#172235; letter-spacing:-.025em; }
       h1 { font-size:clamp(1.7rem,3vw,2.25rem)!important; }
       [data-testid="stMetric"] { background:#fff; border:1px solid #DCE3ED; border-radius:10px; padding:1rem 1.15rem; box-shadow:0 1px 2px #0f172a0a; }
