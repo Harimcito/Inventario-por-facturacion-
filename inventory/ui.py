@@ -313,6 +313,14 @@ def products(con):
     if not rows:
         st.info("Todavía no hay mercadería en el catálogo. Puedes agregar productos o reincorporar uno excluido.")
         return
+    catalog_search = st.text_input("Buscar en el catálogo", placeholder="Producto, descripción o marca", key="products_catalog_search")
+    if catalog_search:
+        query = catalog_search.casefold()
+        rows = [p for p in rows if query in (p["name"] + " " + (p["description"] or "") + " " + (p["category"] or "")).casefold()]
+    st.caption(f"{len(rows)} producto(s) en la vista")
+    if not rows:
+        st.info("No encontré productos con ese texto.")
+        return
     proposals = [(p["id"], p["name"], display_product_name(p["name"])) for p in rows]
     changes = [(pid, old, new) for pid, old, new in proposals if old != new]
     if changes:
