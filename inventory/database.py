@@ -16,7 +16,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
       id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT DEFAULT '',
       stock INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0,
       margin REAL NOT NULL DEFAULT 30, active INTEGER NOT NULL DEFAULT 1,
-      min_stock INTEGER NOT NULL DEFAULT 3, description TEXT DEFAULT ''
+      min_stock INTEGER NOT NULL DEFAULT 3, description TEXT DEFAULT '',
+      item_type TEXT NOT NULL DEFAULT 'Mercadería'
     );
     CREATE TABLE IF NOT EXISTS receipts(
       id INTEGER PRIMARY KEY, supplier TEXT, invoice_no TEXT, doc_date TEXT,
@@ -52,7 +53,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     """)
     receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(receipts)")}
     migrations = {
-        "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"), ("description", "TEXT DEFAULT ''")),
+        "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"), ("description", "TEXT DEFAULT ''"),
+                     ("item_type", "TEXT NOT NULL DEFAULT 'Mercadería'")),
         "receipt_lines": (("line_type", "TEXT NOT NULL DEFAULT 'Mercadería'"),),
         "receipts": (("rut", "TEXT DEFAULT ''"), ("doc_type", "TEXT DEFAULT ''"),
                      ("duplicate_of", "INTEGER"), ("total_amount", "TEXT DEFAULT ''"),
@@ -138,9 +140,11 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                 if line_type != "Mercadería":
                     product_id = None
                 elif product_id:
-                    product = con.execute("SELECT id,name FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
+                    product = con.execute("SELECT id,name,item_type FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
                     if not product:
                         raise ValueError("El producto seleccionado ya no está disponible.")
+                    if product["item_type"] != "Mercadería":
+                        raise ValueError("El elemento seleccionado está clasificado como concepto no inventariable.")
                     product_id = product["id"]
                     if normalize_product_key(name) != normalize_product_key(product["name"]):
                         save_product_alias(con, product_id, name)
@@ -200,4 +204,37 @@ def save_product_alias(con, product_id: int, alias: str):
         return
     con.execute("INSERT OR IGNORE INTO product_aliases(product_id,alias,alias_key) VALUES(?,?,?)",
                 (product_id, alias, alias_key))
+
+
+def set_product_classification(con, product_id: int, item_type: str, reason: str = ""):
+    """Reclasifica un elemento; los conceptos no inventariables dejan stock cero con auditoría."""
+    valid_types = {"Mercadería", "Servicio tecnológico/profesional", "Flete o despacho",
+                   "Comisión o recargo", "Impuesto, descuento u otro ajuste"}
+    if item_type not in valid_types:
+        raise ValueError("Clasificación no reconocida.")
+    product = con.execute("SELECT id,name,stock,item_type FROM products WHERE id=?", (product_id,)).fetchone()
+    if not product:
+        raise ValueError("No se encontró el producto.")
+    with con:
+        if item_type != "Mercadería" and int(product["stock"]):
+            adjustment_reason = reason or f"Reclasificado como {item_type}; concepto no inventariable."
+            con.execute("""INSERT INTO inventory_adjustments
+                (product_id,old_stock,new_stock,delta,reason) VALUES(?,?,?,?,?)""",
+                (product_id, product["stock"], 0, -int(product["stock"]), adjustment_reason))
+            con.execute("UPDATE products SET stock=0 WHERE id=?", (product_id,))
+        con.execute("UPDATE products SET item_type=? WHERE id=?", (item_type, product_id))
+        if item_type != "Mercadería":
+            con.execute("UPDATE receipt_lines SET line_type=?,product_id=NULL WHERE product_id=?",
+                        (item_type, product_id))
+            moves = con.execute("""SELECT m.receipt_id,m.quantity,m.unit_cost FROM movements m
+                WHERE m.product_id=? AND NOT EXISTS(SELECT 1 FROM receipt_lines l
+                WHERE l.receipt_id=m.receipt_id AND l.product_id=m.product_id) ORDER BY m.id""", (product_id,)).fetchall()
+            for move in moves:
+                line_no = con.execute("SELECT COALESCE(MAX(line_number),0)+1 FROM receipt_lines WHERE receipt_id=?",
+                                      (move["receipt_id"],)).fetchone()[0]
+                con.execute("""INSERT INTO receipt_lines
+                    (receipt_id,line_number,original_description,product_id,quantity,unit_cost,line_total,line_type)
+                    VALUES(?,?,?,?,?,?,?,?)""",
+                    (move["receipt_id"], line_no, product["name"], None, move["quantity"],
+                     move["unit_cost"], move["quantity"]*move["unit_cost"], item_type))
 
