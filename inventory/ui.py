@@ -9,7 +9,7 @@ import streamlit as st
 from inventory.database import find_duplicate, record_receipt, update_product
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key
 from inventory.theme import page_header
-from inventory.text import clean_product_name
+from inventory.text import clean_product_name, normalize_product_key
 from inventory.classifier import classify_line, LINE_TYPES, MERCHANDISE
 
 
@@ -28,7 +28,7 @@ def dashboard(con):
         st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
     st.subheader("Stock actual")
     if products:
-        st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"], "Stock mínimo": p["min_stock"],
+        st.dataframe([{"Producto": p["name"], "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Stock mínimo": p["min_stock"],
             "Costo unitario": f"$ {p['cost']:,}".replace(",", "."), "Margen": f"{p['margin']:g}%",
             "Precio sugerido": f"$ {round(p['cost']*(1+p['margin']/100)):,}".replace(",", ".")}
             for p in products], use_container_width=True, hide_index=True)
@@ -142,7 +142,11 @@ def documents(con, docs_dir: Path):
         if any(float(row.get("cantidad") or 0) % 1 for row in rows):
             st.warning("El XML incluye una cantidad fraccionaria. Ajusta manualmente las unidades completas antes de confirmar.")
         edited = []
-        catalog = con.execute("SELECT id,name FROM products WHERE active=1 ORDER BY name").fetchall()
+        catalog = con.execute("SELECT id,name,category,description FROM products WHERE active=1 ORDER BY name").fetchall()
+        alias_rows = con.execute("SELECT product_id,alias,alias_key FROM product_aliases").fetchall()
+        aliases_by_product = {}
+        for alias in alias_rows:
+            aliases_by_product.setdefault(alias["product_id"], []).append(alias["alias"])
         for index, row in enumerate(rows):
             with st.container(border=True):
                 name = st.text_input("Descripción de factura", row.get("nombre", ""), key=f"name_{selected}_{index}")
@@ -163,24 +167,32 @@ def documents(con, docs_dir: Path):
                     value=max(0, int(float(row.get("costo_unitario") or 0))), step=100, key=f"cost_{selected}_{index}")
                 mapping = None
                 if selected_type == MERCHANDISE:
-                    normalized_name = clean_product_name(name).casefold()
-                    ranked = sorted(catalog, key=lambda p: SequenceMatcher(None, normalized_name,
-                        clean_product_name(p["name"]).casefold()).ratio(), reverse=True)
-                    possible = [p for p in ranked if normalized_name and SequenceMatcher(None, normalized_name,
-                        clean_product_name(p["name"]).casefold()).ratio() >= .68][:3]
+                    normalized_name = normalize_product_key(name)
+                    def similarity(product):
+                        labels = [product["name"], *aliases_by_product.get(product["id"], [])]
+                        return max((SequenceMatcher(None, normalized_name, normalize_product_key(label)).ratio()
+                                    for label in labels), default=0)
+                    ranked = sorted(catalog, key=similarity, reverse=True)
+                    possible = [p for p in ranked if normalized_name and similarity(p) >= .68][:3]
                     if possible:
                         st.caption("Posibles coincidencias: " + " · ".join(p["name"] for p in possible) + ". Confirma la correcta en el selector.")
                     options = [None] + [p["id"] for p in ranked]
                     default_id = row.get("product_id")
                     if default_id not in options:
-                        exact = next((p["id"] for p in catalog if clean_product_name(p["name"]).casefold() == normalized_name), None)
+                        exact = next((p["id"] for p in catalog if normalize_product_key(p["name"]) == normalized_name), None)
+                        if exact is None:
+                            exact = next((a["product_id"] for a in alias_rows if a["alias_key"] == normalized_name), None)
                         default_id = exact
                     mapping = st.selectbox("Asociar al producto del inventario", options,
                         index=options.index(default_id) if default_id in options else 0,
-                        format_func=lambda pid: "Crear producto del catálogo automáticamente" if pid is None else next(p["name"] for p in catalog if p["id"] == pid),
+                        format_func=lambda pid: "Crear producto nuevo" if pid is None else next(
+                            f"{p['name']} · {p['category']}" if p["category"] else p["name"]
+                            for p in catalog if p["id"] == pid),
                         key=f"mapping_{selected}_{index}")
                     if mapping is None:
                         st.caption("Si confirmas, esta línea creará un producto nuevo en el catálogo.")
+                    elif normalize_product_key(name) != normalize_product_key(next(p["name"] for p in catalog if p["id"] == mapping)):
+                        st.caption("Al confirmar, este nombre de factura se guardará como alias para facilitar futuras coincidencias.")
                 else:
                     st.info("Se conservará en el detalle de la factura y no se ingresará al stock.")
                 edited.append({"nombre": name, "cantidad": quantity, "costo_unitario": cost,
@@ -233,6 +245,7 @@ def products(con):
         with st.form("new_product"):
             name = st.text_input("Nombre del producto")
             category = st.text_input("Categoría")
+            description = st.text_input("Descripción / formato / variante", placeholder="Ej.: sabor, tamaño, color o presentación")
             a, b, c = st.columns(3)
             stock = a.number_input("Stock inicial (unidades)", 0, 100000, 0)
             cost = b.number_input("Costo unitario", 0, 100000000, 0)
@@ -245,8 +258,8 @@ def products(con):
                 else:
                     try:
                         with con:
-                            con.execute("INSERT INTO products(name,category,stock,cost,margin,min_stock) VALUES(?,?,?,?,?,?)",
-                                (name.strip(), category.strip(), stock, cost, margin, min_stock))
+                            con.execute("INSERT INTO products(name,category,description,stock,cost,margin,min_stock) VALUES(?,?,?,?,?,?,?)",
+                                (name.strip(), category.strip(), description.strip(), stock, cost, margin, min_stock))
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar: {exc}")
@@ -278,7 +291,7 @@ def products(con):
                         con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
                 st.success("Descripciones corregidas sin cambiar stock ni movimientos.")
                 st.rerun()
-    st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
+    st.dataframe([{"Producto": p["name"], "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
         "Costo": p["cost"], "Margen %": p["margin"], "Precio sugerido": round(p["cost"] * (1 + p["margin"] / 100))}
         for p in rows], use_container_width=True, hide_index=True)
     with st.expander("Editar producto"):
@@ -286,6 +299,10 @@ def products(con):
         with st.form(f"edit_{product['id']}"):
             name = st.text_input("Nombre del producto", product["name"])
             category = st.text_input("Categoría", product["category"] or "")
+            description = st.text_input("Descripción / formato / variante", product["description"] or "")
+            current_aliases = [r[0] for r in con.execute("SELECT alias FROM product_aliases WHERE product_id=? ORDER BY alias", (product["id"],))]
+            aliases_text = st.text_input("Nombres alternativos de proveedores (separados por coma)", ", ".join(current_aliases),
+                help="Se usarán para reconocer este producto en próximas facturas.")
             a, b, c = st.columns(3)
             stock = a.number_input("Stock (unidades)", 0, 100000, product["stock"])
             cost = b.number_input("Costo", 0, 100000000, product["cost"])
@@ -298,7 +315,8 @@ def products(con):
                     st.error("El nombre no puede quedar vacío.")
                 else:
                     try:
-                        update_product(con, product["id"], name, category, stock, cost, margin, min_stock, reason)
+                        aliases = [alias.strip() for alias in aliases_text.split(",") if alias.strip()]
+                        update_product(con, product["id"], name, category, stock, cost, margin, min_stock, reason, description, aliases)
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar el producto: {exc}")
@@ -362,10 +380,14 @@ def exports(con, root: Path):
     import csv, io, zipfile
     from datetime import datetime
     page_header("Respaldo y exportación", "Descarga una copia del inventario y de sus documentos originales.")
-    products = con.execute("SELECT name,category,stock,min_stock,cost,margin,ROUND(cost*(1+margin/100)) AS suggested FROM products WHERE active=1 ORDER BY name").fetchall()
+    products = con.execute("""SELECT p.name,p.description,p.category,p.stock,p.min_stock,p.cost,p.margin,
+        ROUND(p.cost*(1+p.margin/100)) AS suggested,
+        (SELECT group_concat(alias, '; ') FROM product_aliases a WHERE a.product_id=p.id) AS aliases
+        FROM products p WHERE p.active=1 ORDER BY p.name""").fetchall()
     out = io.StringIO(); writer = csv.writer(out)
-    writer.writerow(["Producto", "Categoría", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
-    writer.writerows([tuple(row) for row in products])
+    writer.writerow(["Producto", "Descripción", "Categoría", "Nombres alternativos", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
+    writer.writerows([(row["name"], row["description"], row["category"], row["aliases"], row["stock"],
+                       row["min_stock"], row["cost"], row["margin"], row["suggested"]) for row in products])
     st.download_button("Descargar inventario en CSV", out.getvalue().encode("utf-8-sig"), "inventario.csv", "text/csv")
     if st.button("Preparar respaldo completo (base + documentos)", type="primary"):
         db_copy = root / "respaldo_temporal.db"
