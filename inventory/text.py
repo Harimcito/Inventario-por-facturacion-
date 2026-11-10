@@ -42,6 +42,13 @@ def clean_product_name(value: str) -> str:
     return text[:250]
 
 
+def normalize_product_key(value: str) -> str:
+    """Clave comparable: ignora tildes, mayúsculas y separadores OCR comunes."""
+    text = unicodedata.normalize("NFKD", clean_product_name(value).casefold())
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return re.sub(r"[^a-z0-9]", "", text)
+
+
 def normalize_supplier(value: str) -> str:
     value = unicodedata.normalize("NFKD", str(value or "")).casefold()
     value = "".join(char for char in value if not unicodedata.combining(char))
@@ -50,3 +57,4 @@ def normalize_supplier(value: str) -> str:
 
 def normalize_rut(value: str) -> str:
     return re.sub(r"[^0-9kK]", "", str(value or "")).upper()
+
