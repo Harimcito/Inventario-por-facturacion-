@@ -48,7 +48,7 @@ def _password_hash(password: str, salt: bytes) -> str:
 
 
 def _valid_password(password: str) -> bool:
-    return len(password) >= 12
+    return len(password) >= 6
 
 
 def render_login(root: Path) -> bool:
@@ -71,7 +71,7 @@ def render_login(root: Path) -> bool:
             if len(normalized) < 3:
                 st.error("El usuario debe tener al menos 3 caracteres.")
             elif not _valid_password(password):
-                st.error("Usa una contraseña de al menos 12 caracteres.")
+                st.error("Usa una contraseña de al menos 6 caracteres.")
             elif password.casefold() == normalized.casefold():
                 st.error("La contraseña no puede ser igual al usuario.")
             elif password != confirmation:
@@ -169,7 +169,7 @@ def render_security_sidebar(root: Path):
                     if not hmac.compare_digest(expected, account["password_hash"]):
                         st.error("La contraseña actual no coincide.")
                     elif not _valid_password(new):
-                        st.error("Usa una contraseña de al menos 12 caracteres.")
+                        st.error("Usa una contraseña de al menos 6 caracteres.")
                     elif new.casefold() == account["username"].casefold():
                         st.error("La contraseña no puede ser igual al usuario.")
                     elif new != confirm:
