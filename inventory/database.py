@@ -2,7 +2,7 @@
 import sqlite3
 from pathlib import Path
 
-from inventory.text import clean_product_name, normalize_rut, normalize_supplier
+from inventory.text import clean_product_name, normalize_product_key, normalize_rut, normalize_supplier
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -16,7 +16,7 @@ def connect(db_path: Path) -> sqlite3.Connection:
       id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT DEFAULT '',
       stock INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0,
       margin REAL NOT NULL DEFAULT 30, active INTEGER NOT NULL DEFAULT 1,
-      min_stock INTEGER NOT NULL DEFAULT 3
+      min_stock INTEGER NOT NULL DEFAULT 3, description TEXT DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS receipts(
       id INTEGER PRIMARY KEY, supplier TEXT, invoice_no TEXT, doc_date TEXT,
@@ -41,12 +41,18 @@ def connect(db_path: Path) -> sqlite3.Connection:
       old_stock INTEGER NOT NULL, new_stock INTEGER NOT NULL, delta INTEGER NOT NULL,
       reason TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS product_aliases(
+      id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      alias TEXT NOT NULL, alias_key TEXT NOT NULL UNIQUE,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(product_id, alias_key)
+    );
     CREATE INDEX IF NOT EXISTS idx_receipts_folio ON receipts(supplier, invoice_no);
     CREATE INDEX IF NOT EXISTS idx_movements_receipt ON movements(receipt_id);
     """)
     receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(receipts)")}
     migrations = {
-        "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"),),
+        "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"), ("description", "TEXT DEFAULT ''")),
         "receipt_lines": (("line_type", "TEXT NOT NULL DEFAULT 'Mercadería'"),),
         "receipts": (("rut", "TEXT DEFAULT ''"), ("doc_type", "TEXT DEFAULT ''"),
                      ("duplicate_of", "INTEGER"), ("total_amount", "TEXT DEFAULT ''"),
@@ -132,10 +138,12 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                 if line_type != "Mercadería":
                     product_id = None
                 elif product_id:
-                    product = con.execute("SELECT id FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
+                    product = con.execute("SELECT id,name FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
                     if not product:
                         raise ValueError("El producto seleccionado ya no está disponible.")
                     product_id = product["id"]
+                    if normalize_product_key(name) != normalize_product_key(product["name"]):
+                        save_product_alias(con, product_id, name)
                 elif duplicate_of is None:
                     con.execute("INSERT OR IGNORE INTO products(name,stock,cost) VALUES(?,0,?)", (name, cost))
                     product_id = con.execute("SELECT id FROM products WHERE name=?", (name,)).fetchone()["id"]
@@ -156,7 +164,8 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
 
 
 def update_product(con, product_id: int, name: str, category: str, new_stock: int,
-                   cost: int, margin: float, min_stock: int, adjustment_reason: str = ""):
+                   cost: int, margin: float, min_stock: int, adjustment_reason: str = "",
+                   description: str = "", aliases: list[str] | None = None):
     """Actualiza ficha; todo cambio manual de unidades deja un ajuste auditable."""
     name = clean_product_name(name)
     if not name:
@@ -169,10 +178,26 @@ def update_product(con, product_id: int, name: str, category: str, new_stock: in
     if delta and not adjustment_reason.strip():
         raise ValueError("Explica brevemente el motivo del ajuste de stock.")
     with con:
-        con.execute("""UPDATE products SET name=?,category=?,stock=?,cost=?,margin=?,min_stock=? WHERE id=?""",
-                    (name, category.strip(), new_stock, cost, margin, min_stock, product_id))
+        con.execute("""UPDATE products SET name=?,category=?,description=?,stock=?,cost=?,margin=?,min_stock=? WHERE id=?""",
+                    (name, category.strip(), description.strip(), new_stock, cost, margin, min_stock, product_id))
+        if aliases is not None:
+            con.execute("DELETE FROM product_aliases WHERE product_id=?", (product_id,))
+            for alias in aliases:
+                save_product_alias(con, product_id, alias)
         if delta:
             con.execute("""INSERT INTO inventory_adjustments
                 (product_id,old_stock,new_stock,delta,reason) VALUES(?,?,?,?,?)""",
                 (product_id, old_stock, int(new_stock), delta, adjustment_reason.strip()))
+
+
+def save_product_alias(con, product_id: int, alias: str):
+    alias = clean_product_name(alias)
+    alias_key = normalize_product_key(alias)
+    if not alias_key:
+        return
+    product = con.execute("SELECT name FROM products WHERE id=?", (product_id,)).fetchone()
+    if not product or alias_key == normalize_product_key(product["name"]):
+        return
+    con.execute("INSERT OR IGNORE INTO product_aliases(product_id,alias,alias_key) VALUES(?,?,?)",
+                (product_id, alias, alias_key))
 
