@@ -1,0 +1,11 @@
+# Inventario local: nunca subir documentos ni datos comerciales.
+inventario.db
+inventario.db-shm
+inventario.db-wal
+documentos/
+.streamlit/auth.json
+.streamlit/secrets.toml
+.venv/
+venv/
+__pycache__/
+*.py[cod]
