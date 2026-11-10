@@ -1,10 +1,11 @@
 """Vistas Streamlit; las reglas de negocio permanecen en servicios separados."""
 import uuid
+import sqlite3
 from pathlib import Path
 from datetime import date
 import streamlit as st
 
-from inventory.database import find_duplicate, record_receipt
+from inventory.database import find_duplicate, record_receipt, update_product
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key
 from inventory.theme import page_header
 from inventory.text import clean_product_name
@@ -20,12 +21,12 @@ def dashboard(con):
     b.metric("Unidades en stock", sum(p["stock"] for p in products))
     c.metric("Facturas registradas", receipts)
     d.metric("Repetidas archivadas", duplicates)
-    low_stock = sum(p["stock"] <= 3 for p in products)
+    low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
     if low_stock:
-        st.warning(f"{low_stock} producto(s) tienen 3 unidades o menos.")
+        st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
     st.subheader("Stock actual")
     if products:
-        st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"],
+        st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"], "Stock mínimo": p["min_stock"],
             "Costo unitario": f"$ {p['cost']:,}".replace(",", "."), "Margen": f"{p['margin']:g}%",
             "Precio sugerido": f"$ {round(p['cost']*(1+p['margin']/100)):,}".replace(",", ".")}
             for p in products], use_container_width=True, hide_index=True)
@@ -138,15 +139,25 @@ def documents(con, docs_dir: Path):
         if any(float(row.get("cantidad") or 0) % 1 for row in rows):
             st.warning("El XML incluye una cantidad fraccionaria. Ajusta manualmente las unidades completas antes de confirmar.")
         edited = []
+        catalog = con.execute("SELECT id,name FROM products WHERE active=1 ORDER BY name").fetchall()
         for index, row in enumerate(rows):
             with st.container(border=True):
-                c1, c2, c3 = st.columns([2.3, .8, 1.15])
-                name = c1.text_input("Producto", row.get("nombre", ""), key=f"name_{selected}_{index}")
+                c1, c2, c3 = st.columns([2, .72, 1])
+                name = c1.text_input("Descripción de factura", row.get("nombre", ""), key=f"name_{selected}_{index}")
                 quantity = c2.number_input("Unidades", min_value=0, max_value=100000,
                     value=max(0, int(float(row.get("cantidad") or 1))), step=1, key=f"qty_{selected}_{index}")
                 cost = c3.number_input("Costo unitario", min_value=0, max_value=100000000,
                     value=max(0, int(float(row.get("costo_unitario") or 0))), step=100, key=f"cost_{selected}_{index}")
-                edited.append({"nombre": name, "cantidad": quantity, "costo_unitario": cost})
+                options = [None] + [p["id"] for p in catalog]
+                default_id = row.get("product_id")
+                if default_id not in options:
+                    exact = next((p["id"] for p in catalog if clean_product_name(p["name"]).casefold() == clean_product_name(name).casefold()), None)
+                    default_id = exact
+                mapping = st.selectbox("Asociar al producto del inventario", options,
+                    index=options.index(default_id) if default_id in options else 0,
+                    format_func=lambda pid: "Crear producto del catálogo automáticamente" if pid is None else next(p["name"] for p in catalog if p["id"] == pid),
+                    key=f"mapping_{selected}_{index}")
+                edited.append({"nombre": name, "cantidad": quantity, "costo_unitario": cost, "product_id": mapping})
         item["supplier"], item["number"], item["date"], item["items"] = supplier, number, doc_date, edited
         add, remove = st.columns(2)
         if add.button("＋ Agregar producto", key=f"add_{selected}"):
@@ -197,6 +208,7 @@ def products(con):
             stock = a.number_input("Stock inicial (unidades)", 0, 100000, 0)
             cost = b.number_input("Costo unitario", 0, 100000000, 0)
             margin = c.number_input("Margen sobre costo (%)", 0., 10000., 30.)
+            min_stock = st.number_input("Avisarme al llegar a (unidades)", 0, 100000, 3)
             if st.form_submit_button("Guardar producto", type="primary"):
                 name = clean_product_name(name)
                 if not name:
@@ -204,8 +216,8 @@ def products(con):
                 else:
                     try:
                         with con:
-                            con.execute("INSERT INTO products(name,category,stock,cost,margin) VALUES(?,?,?,?,?)",
-                                (name.strip(), category.strip(), stock, cost, margin))
+                            con.execute("INSERT INTO products(name,category,stock,cost,margin,min_stock) VALUES(?,?,?,?,?,?)",
+                                (name.strip(), category.strip(), stock, cost, margin, min_stock))
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar: {exc}")
@@ -237,7 +249,7 @@ def products(con):
                         con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
                 st.success("Descripciones corregidas sin cambiar stock ni movimientos.")
                 st.rerun()
-    st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"],
+    st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
         "Costo": p["cost"], "Margen %": p["margin"], "Precio sugerido": round(p["cost"] * (1 + p["margin"] / 100))}
         for p in rows], use_container_width=True, hide_index=True)
     with st.expander("Editar producto"):
@@ -249,15 +261,15 @@ def products(con):
             stock = a.number_input("Stock (unidades)", 0, 100000, product["stock"])
             cost = b.number_input("Costo", 0, 100000000, product["cost"])
             margin = c.number_input("Margen %", 0., 10000., float(product["margin"]))
+            min_stock = st.number_input("Avisarme al llegar a (unidades)", 0, 100000, int(product["min_stock"]))
+            reason = st.text_input("Motivo del ajuste de stock", placeholder="Recuento, merma, consumo…")
             if st.form_submit_button("Guardar cambios", type="primary"):
                 name = clean_product_name(name)
                 if not name:
                     st.error("El nombre no puede quedar vacío.")
                 else:
                     try:
-                        with con:
-                            con.execute("UPDATE products SET name=?,category=?,stock=?,cost=?,margin=? WHERE id=?",
-                                (name, category.strip(), stock, cost, margin, product["id"]))
+                        update_product(con, product["id"], name, category, stock, cost, margin, min_stock, reason)
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar el producto: {exc}")
@@ -271,9 +283,74 @@ def movements(con):
         st.dataframe([dict(row) for row in rows], use_container_width=True, hide_index=True)
     else:
         st.info("Los ingresos de stock confirmados aparecerán aquí.")
+    adjustments = con.execute("""SELECT a.created_at,p.name,a.old_stock,a.new_stock,a.delta,a.reason
+        FROM inventory_adjustments a JOIN products p ON p.id=a.product_id ORDER BY a.id DESC""").fetchall()
+    st.subheader("Ajustes manuales de stock")
+    if adjustments:
+        st.dataframe([dict(row) for row in adjustments], use_container_width=True, hide_index=True)
+    else:
+        st.caption("Los cambios manuales quedarán registrados aquí con su motivo.")
     duplicates = con.execute("""SELECT d.created_at,d.supplier,d.invoice_no,d.filename,
         original.id AS original_id FROM receipts d JOIN receipts original ON original.id=d.duplicate_of
         ORDER BY d.id DESC""").fetchall()
     if duplicates:
         st.subheader("Facturas repetidas archivadas · sin cambios de stock")
         st.dataframe([dict(row) for row in duplicates], use_container_width=True, hide_index=True)
+
+
+def receipts(con, docs_dir: Path):
+    page_header("Facturas", "Consulta documentos guardados, líneas reconocidas y facturas repetidas.")
+    suppliers = [r[0] for r in con.execute("SELECT DISTINCT supplier FROM receipts ORDER BY supplier")]
+    c1, c2 = st.columns([1, 2])
+    supplier = c1.selectbox("Proveedor", ["Todos"] + suppliers)
+    query = c2.text_input("Buscar folio o proveedor")
+    sql = "SELECT * FROM receipts WHERE 1=1"
+    params = []
+    if supplier != "Todos":
+        sql += " AND supplier=?"; params.append(supplier)
+    if query:
+        sql += " AND (invoice_no LIKE ? OR supplier LIKE ?)"; params.extend([f"%{query}%", f"%{query}%"])
+    rows = con.execute(sql + " ORDER BY id DESC", params).fetchall()
+    if not rows:
+        st.info("Aún no hay documentos que coincidan."); return
+    st.dataframe([{"Fecha": r["doc_date"], "Proveedor": r["supplier"], "Folio": r["invoice_no"],
+        "Estado": "Repetida · no suma stock" if r["duplicate_of"] else "Ingresada",
+        "Total": r["total_amount"], "Archivo": r["filename"]} for r in rows], use_container_width=True, hide_index=True)
+    choice = st.selectbox("Ver detalle de factura", rows,
+        format_func=lambda r: f"{r['doc_date']} · {r['supplier']} · Folio {r['invoice_no']}" + (" · REPETIDA" if r["duplicate_of"] else ""))
+    lines = con.execute("""SELECT l.line_number,l.original_description,p.name AS producto,l.quantity,l.unit_cost,l.line_total
+        FROM receipt_lines l LEFT JOIN products p ON p.id=l.product_id WHERE l.receipt_id=? ORDER BY l.line_number""", (choice["id"],)).fetchall()
+    if lines:
+        st.dataframe([dict(x) for x in lines], use_container_width=True, hide_index=True)
+    file_path = docs_dir / (choice["stored_filename"] or "")
+    if file_path.is_file():
+        st.download_button("Descargar documento original", file_path.read_bytes(), file_name=choice["filename"] or file_path.name)
+    if choice["duplicate_of"]:
+        st.info(f"Archivada como repetida del registro #{choice['duplicate_of']}; no generó movimientos ni stock.")
+
+
+def exports(con, root: Path):
+    import csv, io, zipfile
+    from datetime import datetime
+    page_header("Respaldo y exportación", "Descarga una copia del inventario y de sus documentos originales.")
+    products = con.execute("SELECT name,category,stock,min_stock,cost,margin,ROUND(cost*(1+margin/100)) AS suggested FROM products WHERE active=1 ORDER BY name").fetchall()
+    out = io.StringIO(); writer = csv.writer(out)
+    writer.writerow(["Producto", "Categoría", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
+    writer.writerows([tuple(row) for row in products])
+    st.download_button("Descargar inventario en CSV", out.getvalue().encode("utf-8-sig"), "inventario.csv", "text/csv")
+    if st.button("Preparar respaldo completo (base + documentos)", type="primary"):
+        db_copy = root / "respaldo_temporal.db"
+        try:
+            backup = sqlite3.connect(db_copy); con.backup(backup); backup.close()
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
+                z.write(db_copy, "inventario.db")
+                for file in (root / "documentos").glob("*"):
+                    if file.is_file(): z.write(file, f"documentos/{file.name}")
+            st.session_state["inventory_backup"] = archive.getvalue()
+        finally:
+            db_copy.unlink(missing_ok=True)
+    if "inventory_backup" in st.session_state:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M")
+        st.download_button("Descargar respaldo ZIP", st.session_state["inventory_backup"], f"respaldo_inventario_{stamp}.zip", "application/zip")
+
