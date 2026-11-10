@@ -18,14 +18,14 @@ with st.sidebar:
     st.markdown("### 📦 Gioval")
     st.caption("CONTROL DE INVENTARIO")
     st.divider()
-    page = st.radio("Secciones", ["Resumen", "Ingresar compras", "Facturas", "Productos", "Movimientos", "Respaldo"],
+    page = st.radio("Secciones", ["Resumen", "Ingresar facturas", "Facturas", "Productos", "Movimientos", "Respaldo"],
                     label_visibility="collapsed")
     st.divider()
-    st.caption("El stock solo cambia cuando confirmas una compra.")
+    st.caption("Solo las líneas clasificadas como mercadería ingresan al stock.")
 
 if page == "Resumen":
     dashboard(con)
-elif page == "Ingresar compras":
+elif page == "Ingresar facturas":
     documents(con, ROOT / "documentos")
 elif page == "Facturas":
     receipts(con, ROOT / "documentos")
