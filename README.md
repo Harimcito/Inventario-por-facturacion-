@@ -22,3 +22,10 @@ El SII permite generar un archivo XML de respaldo desde Historial de DTE recibid
 Comprueba nombres, cantidades enteras y costos del detalle antes de confirmar. El importador muestra costo unitario XML y total del documento; confirma tratamiento del costo según tu criterio contable. Se bloquean folios ya registrados para evitar sumar stock dos veces.
 
 La app guarda base en `inventario.db` y XML/documentos confirmados en `documentos/`; esos datos comerciales deben permanecer fuera de GitHub. El precio sugerido usa markup: `costo × (1 + margen/100)`.
+
+
+## Acceso y contraseñas
+
+En el primer inicio, crea tu usuario y contraseña desde la app. Se exige una contraseña de al menos 12 caracteres; se guarda un hash PBKDF2 con salt en `.streamlit/auth.json`, archivo excluido de Git. Tras 5 intentos fallidos se bloquea el acceso durante 15 minutos, las sesiones vencen luego de 30 minutos sin actividad y la contraseña se puede cambiar desde el menú lateral. Para reiniciar el acceso local, detén la app y elimina `.streamlit/auth.json`; la base de inventario no se elimina.
+
+El iniciador escucha solo en `127.0.0.1`. Para abrir el sistema desde otro dispositivo hay que configurar acceso de red y HTTPS; el login por sí solo no cifra la conexión HTTP. La base SQLite, documentos y credenciales están excluidos de Git.
