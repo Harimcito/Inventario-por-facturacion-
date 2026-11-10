@@ -103,6 +103,13 @@ def documents(con, docs_dir: Path):
                         except (ValueError, TypeError):
                             pass
                         item["items"] = data.get("productos", [])
+                        st.session_state[f"supplier_{selected}"] = item["supplier"]
+                        st.session_state[f"number_{selected}"] = item["number"]
+                        st.session_state[f"date_{selected}"] = item["date"]
+                        for index, row in enumerate(item["items"]):
+                            st.session_state[f"name_{selected}_{index}"] = row.get("nombre", "")
+                            st.session_state[f"qty_{selected}_{index}"] = max(0, int(float(row.get("cantidad") or 1)))
+                            st.session_state[f"cost_{selected}_{index}"] = max(0, int(float(row.get("costo_unitario") or 0)))
                         st.success("Lectura lista: revisa datos y cantidades antes de confirmar.")
                     else:
                         item["raw"] = local_ocr(item["bytes"], item["source_name"])
