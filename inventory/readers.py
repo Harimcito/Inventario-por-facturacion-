@@ -39,7 +39,10 @@ def ai_extract(data: bytes, filename: str, api_key: str):
     images = document_images(data, filename)
     contents = [{"type": "text", "text": (
         "Lee esta factura/boleta chilena y devuelve JSON con proveedor, numero, "
-        "fecha YYYY-MM-DD, productos [{nombre,cantidad,costo_unitario}]. "
+        "fecha YYYY-MM-DD y productos [{nombre,cantidad,costo_unitario}]. Incluye TODAS las líneas de detalle, "
+        "también servicios, fletes, comisiones e impuestos/ajustes; no las omitas ni las conviertas en productos. "
+        "Conserva en nombre los datos que identifican el artículo si aparecen: marca, modelo, SKU, tamaño, color, "
+        "formato, sabor, presentación y cantidad del envase. No agregues información inferida. "
         "No inventes datos; usa vacío o cero cuando no se distingan. "
         "El inventario cuenta unidades enteras: no conviertas cajas sin evidencia."
     )}]
@@ -81,3 +84,4 @@ def drafts_from_upload(filename: str, data: bytes):
         return drafts
     return [{"bytes": data, "source_name": filename, "supplier": "", "number": "",
              "date": date.today(), "items": [], "raw": "", "dte": False}]
+
