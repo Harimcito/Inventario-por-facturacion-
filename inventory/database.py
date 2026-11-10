@@ -15,27 +15,50 @@ def connect(db_path: Path) -> sqlite3.Connection:
     CREATE TABLE IF NOT EXISTS products(
       id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL, category TEXT DEFAULT '',
       stock INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0,
-      margin REAL NOT NULL DEFAULT 30, active INTEGER NOT NULL DEFAULT 1
+      margin REAL NOT NULL DEFAULT 30, active INTEGER NOT NULL DEFAULT 1,
+      min_stock INTEGER NOT NULL DEFAULT 3
     );
     CREATE TABLE IF NOT EXISTS receipts(
       id INTEGER PRIMARY KEY, supplier TEXT, invoice_no TEXT, doc_date TEXT,
       filename TEXT, created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      rut TEXT DEFAULT '', doc_type TEXT DEFAULT '', duplicate_of INTEGER
+      rut TEXT DEFAULT '', doc_type TEXT DEFAULT '', duplicate_of INTEGER,
+      total_amount TEXT DEFAULT '', stored_filename TEXT DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS movements(
       id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id),
       receipt_id INTEGER NOT NULL REFERENCES receipts(id), quantity INTEGER NOT NULL,
       unit_cost INTEGER NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+    CREATE TABLE IF NOT EXISTS receipt_lines(
+      id INTEGER PRIMARY KEY, receipt_id INTEGER NOT NULL REFERENCES receipts(id),
+      line_number INTEGER NOT NULL, original_description TEXT NOT NULL,
+      product_id INTEGER REFERENCES products(id) ON DELETE SET NULL,
+      quantity INTEGER NOT NULL, unit_cost INTEGER NOT NULL,
+      line_total INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS inventory_adjustments(
+      id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES products(id),
+      old_stock INTEGER NOT NULL, new_stock INTEGER NOT NULL, delta INTEGER NOT NULL,
+      reason TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
     CREATE INDEX IF NOT EXISTS idx_receipts_folio ON receipts(supplier, invoice_no);
     CREATE INDEX IF NOT EXISTS idx_movements_receipt ON movements(receipt_id);
     """)
     receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(receipts)")}
-    for column, definition in (("rut", "TEXT DEFAULT ''"), ("doc_type", "TEXT DEFAULT ''"),
-                               ("duplicate_of", "INTEGER")):
-        if column not in receipt_columns:
-            con.execute(f"ALTER TABLE receipts ADD COLUMN {column} {definition}")
+    migrations = {
+        "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"),),
+        "receipts": (("rut", "TEXT DEFAULT ''"), ("doc_type", "TEXT DEFAULT ''"),
+                     ("duplicate_of", "INTEGER"), ("total_amount", "TEXT DEFAULT ''"),
+                     ("stored_filename", "TEXT DEFAULT ''")),
+    }
+    for table, columns in migrations.items():
+        present = {row[1] for row in con.execute(f"PRAGMA table_info({table})")}
+        for column, definition in columns:
+            if column not in present:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
     con.execute("CREATE INDEX IF NOT EXISTS idx_receipts_duplicate ON receipts(duplicate_of)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_receipt_lines_receipt ON receipt_lines(receipt_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_adjustments_product ON inventory_adjustments(product_id)")
     return con
 
 
@@ -89,27 +112,61 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
     try:
         with con:
             cur = con.execute(
-                """INSERT INTO receipts(supplier,invoice_no,doc_date,filename,rut,doc_type,duplicate_of)
-                   VALUES(?,?,?,?,?,?,?)""",
+                """INSERT INTO receipts(supplier,invoice_no,doc_date,filename,rut,doc_type,
+                   duplicate_of,total_amount,stored_filename) VALUES(?,?,?,?,?,?,?,?,?)""",
                 (supplier, number, str(receipt["date"]), receipt.get("source_name", ""),
-                 receipt.get("rut", ""), receipt.get("kind", ""), duplicate_of),
+                 receipt.get("rut", ""), receipt.get("kind", ""), duplicate_of,
+                 str(receipt.get("total", "")), document_path.name),
             )
             receipt_id = cur.lastrowid
-            if duplicate_of is not None:
-                return receipt_id
-            for item in items:
+            for line_number, item in enumerate(items, start=1):
                 name = clean_product_name(item["nombre"])
                 if not name:
                     raise ValueError("El nombre del producto quedó vacío después de limpiarlo.")
                 qty, cost = int(item["cantidad"]), int(item.get("costo_unitario", 0))
-                con.execute("INSERT OR IGNORE INTO products(name,stock,cost) VALUES(?,0,?)", (name, cost))
-                product_id = con.execute("SELECT id FROM products WHERE name=?", (name,)).fetchone()["id"]
-                con.execute("UPDATE products SET stock=stock+?, cost=? WHERE id=?", (qty, cost, product_id))
-                con.execute(
-                    "INSERT INTO movements(product_id,receipt_id,quantity,unit_cost) VALUES(?,?,?,?)",
-                    (product_id, receipt_id, qty, cost),
-                )
+                product_id = item.get("product_id")
+                if product_id:
+                    product = con.execute("SELECT id FROM products WHERE id=? AND active=1", (product_id,)).fetchone()
+                    if not product:
+                        raise ValueError("El producto seleccionado ya no está disponible.")
+                    product_id = product["id"]
+                elif duplicate_of is None:
+                    con.execute("INSERT OR IGNORE INTO products(name,stock,cost) VALUES(?,0,?)", (name, cost))
+                    product_id = con.execute("SELECT id FROM products WHERE name=?", (name,)).fetchone()["id"]
+                con.execute("""INSERT INTO receipt_lines
+                    (receipt_id,line_number,original_description,product_id,quantity,unit_cost,line_total)
+                    VALUES(?,?,?,?,?,?,?)""",
+                    (receipt_id, line_number, name, product_id, qty, cost, qty * cost))
+                if duplicate_of is None:
+                    con.execute("UPDATE products SET stock=stock+?, cost=? WHERE id=?", (qty, cost, product_id))
+                    con.execute(
+                        "INSERT INTO movements(product_id,receipt_id,quantity,unit_cost) VALUES(?,?,?,?)",
+                        (product_id, receipt_id, qty, cost),
+                    )
     except Exception:
         document_path.unlink(missing_ok=True)
         raise
     return receipt_id
+
+
+def update_product(con, product_id: int, name: str, category: str, new_stock: int,
+                   cost: int, margin: float, min_stock: int, adjustment_reason: str = ""):
+    """Actualiza ficha; todo cambio manual de unidades deja un ajuste auditable."""
+    name = clean_product_name(name)
+    if not name:
+        raise ValueError("El nombre del producto no puede quedar vacío.")
+    current = con.execute("SELECT stock FROM products WHERE id=?", (product_id,)).fetchone()
+    if not current:
+        raise ValueError("No se encontró el producto.")
+    old_stock = int(current["stock"])
+    delta = int(new_stock) - old_stock
+    if delta and not adjustment_reason.strip():
+        raise ValueError("Explica brevemente el motivo del ajuste de stock.")
+    with con:
+        con.execute("""UPDATE products SET name=?,category=?,stock=?,cost=?,margin=?,min_stock=? WHERE id=?""",
+                    (name, category.strip(), new_stock, cost, margin, min_stock, product_id))
+        if delta:
+            con.execute("""INSERT INTO inventory_adjustments
+                (product_id,old_stock,new_stock,delta,reason) VALUES(?,?,?,?,?)""",
+                (product_id, old_stock, int(new_stock), delta, adjustment_reason.strip()))
+
