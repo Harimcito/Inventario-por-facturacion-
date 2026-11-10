@@ -1,6 +1,20 @@
 """Inventario por facturación · Gioval."""
 from pathlib import Path
+import importlib
 import streamlit as st
+
+from inventory import text as inventory_text
+from inventory import classifier as inventory_classifier
+from inventory import database as inventory_database
+from inventory import readers as inventory_readers
+from inventory import auth as inventory_auth
+from inventory import theme as inventory_theme
+from inventory import ui as inventory_ui
+
+# Ensure edited service modules are picked up during Streamlit's in-place rerun.
+for module in (inventory_text, inventory_classifier, inventory_database,
+               inventory_readers, inventory_auth, inventory_theme, inventory_ui):
+    importlib.reload(module)
 
 from inventory.database import connect
 from inventory.auth import render_login, render_security_sidebar
