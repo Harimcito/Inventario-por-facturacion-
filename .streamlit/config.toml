@@ -14,3 +14,8 @@ headingFont = "sans serif"
 baseRadius = "small"
 buttonRadius = "small"
 showWidgetBorder = true
+
+[server]
+port = 8506
+address = "127.0.0.1"
+headless = true
