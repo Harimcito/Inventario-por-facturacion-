@@ -4,20 +4,25 @@ from pathlib import Path
 from datetime import date
 import streamlit as st
 
-from inventory.database import record_receipt
+from inventory.database import find_duplicate, record_receipt
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key
 from inventory.theme import page_header
+from inventory.text import clean_product_name
 
 
 def dashboard(con):
     products = con.execute("SELECT * FROM products WHERE active=1 ORDER BY name").fetchall()
-    receipts = con.execute("SELECT COUNT(*) AS n FROM receipts").fetchone()["n"]
+    receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL").fetchone()["n"]
+    duplicates = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NOT NULL").fetchone()["n"]
     page_header("Inventario de mercadería", "Compras recibidas, unidades disponibles y precios sugeridos.")
     a, b, c, d = st.columns(4)
     a.metric("Productos activos", len(products))
     b.metric("Unidades en stock", sum(p["stock"] for p in products))
     c.metric("Facturas registradas", receipts)
-    d.metric("Productos por reponer", sum(p["stock"] <= 3 for p in products))
+    d.metric("Repetidas archivadas", duplicates)
+    low_stock = sum(p["stock"] <= 3 for p in products)
+    if low_stock:
+        st.warning(f"{low_stock} producto(s) tienen 3 unidades o menos.")
     st.subheader("Stock actual")
     if products:
         st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"],
@@ -150,7 +155,24 @@ def documents(con, docs_dir: Path):
         if remove.button("Quitar documento", key=f"remove_{selected}"):
             del queue[selected]
             st.rerun()
-        if st.button("Confirmar compra y actualizar stock", type="primary", key=f"confirm_{selected}"):
+        duplicate = find_duplicate(con, item)
+        if duplicate:
+            st.warning("Esta factura ya está registrada. Si agregas esta copia, quedará archivada como repetida y no cambiará el stock.")
+            st.caption(f"Documento original: {duplicate['supplier']} · Folio {duplicate['invoice_no']} · registro #{duplicate['id']}")
+            save_duplicate, discard_duplicate = st.columns([1.5, 1])
+            if save_duplicate.button("Agregar como repetida · sin modificar stock", key=f"duplicate_{selected}"):
+                try:
+                    path = docs_dir / f"{uuid.uuid4().hex}_{Path(item['source_name']).name}"
+                    record_receipt(con, item, edited, path, duplicate_of=duplicate["id"])
+                    del queue[selected]
+                    st.success("Copia archivada como repetida. No se creó stock ni movimiento.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+            if discard_duplicate.button("Descartar copia", key=f"discard_duplicate_{selected}"):
+                del queue[selected]
+                st.rerun()
+        elif st.button("Confirmar compra y actualizar stock", type="primary", key=f"confirm_{selected}"):
             try:
                 if any(not row["nombre"].strip() for row in edited):
                     raise ValueError("Completa el nombre de cada producto.")
@@ -176,7 +198,8 @@ def products(con):
             cost = b.number_input("Costo unitario", 0, 100000000, 0)
             margin = c.number_input("Margen sobre costo (%)", 0., 10000., 30.)
             if st.form_submit_button("Guardar producto", type="primary"):
-                if not name.strip():
+                name = clean_product_name(name)
+                if not name:
                     st.error("Escribe el nombre del producto.")
                 else:
                     try:
@@ -190,22 +213,54 @@ def products(con):
     if not rows:
         st.info("Todavía no hay productos en el catálogo.")
         return
+    proposals = [(p["id"], p["name"], clean_product_name(p["name"])) for p in rows]
+    changes = [(pid, old, new) for pid, old, new in proposals if old != new]
+    if changes:
+        proposed_counts = {}
+        for _, _, new in changes:
+            proposed_counts[new] = proposed_counts.get(new, 0) + 1
+        safe_changes, conflicts = [], []
+        for pid, old, new in changes:
+            collision = con.execute("SELECT 1 FROM products WHERE name=? AND id<>? LIMIT 1", (new, pid)).fetchone()
+            if collision or proposed_counts[new] > 1:
+                conflicts.append((old, new))
+            else:
+                safe_changes.append((pid, old, new))
+        with st.expander(f"Revisar descripciones para corregir ({len(changes)})", expanded=False):
+            st.caption("Vista previa de espacios entre letras y signos de lectura erróneos. Los nombres con posible conflicto se dejan intactos.")
+            st.dataframe([{"Actual": old, "Corregido": new} for _, old, new in changes], use_container_width=True, hide_index=True)
+            if conflicts:
+                st.warning("Algunos nombres coincidirían con otro producto y no se cambiarán automáticamente.")
+            if safe_changes and st.button(f"Aplicar {len(safe_changes)} corrección(es)", key="clean_product_names"):
+                with con:
+                    for pid, _, new in safe_changes:
+                        con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
+                st.success("Descripciones corregidas sin cambiar stock ni movimientos.")
+                st.rerun()
     st.dataframe([{"Producto": p["name"], "Categoría": p["category"] or "—", "Unidades": p["stock"],
         "Costo": p["cost"], "Margen %": p["margin"], "Precio sugerido": round(p["cost"] * (1 + p["margin"] / 100))}
         for p in rows], use_container_width=True, hide_index=True)
     with st.expander("Editar producto"):
         product = st.selectbox("Producto", rows, format_func=lambda p: p["name"])
         with st.form(f"edit_{product['id']}"):
+            name = st.text_input("Nombre del producto", product["name"])
             category = st.text_input("Categoría", product["category"] or "")
             a, b, c = st.columns(3)
             stock = a.number_input("Stock (unidades)", 0, 100000, product["stock"])
             cost = b.number_input("Costo", 0, 100000000, product["cost"])
             margin = c.number_input("Margen %", 0., 10000., float(product["margin"]))
             if st.form_submit_button("Guardar cambios", type="primary"):
-                with con:
-                    con.execute("UPDATE products SET category=?,stock=?,cost=?,margin=? WHERE id=?",
-                        (category.strip(), stock, cost, margin, product["id"]))
-                st.rerun()
+                name = clean_product_name(name)
+                if not name:
+                    st.error("El nombre no puede quedar vacío.")
+                else:
+                    try:
+                        with con:
+                            con.execute("UPDATE products SET name=?,category=?,stock=?,cost=?,margin=? WHERE id=?",
+                                (name, category.strip(), stock, cost, margin, product["id"]))
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"No se pudo guardar el producto: {exc}")
 
 
 def movements(con):
@@ -216,3 +271,9 @@ def movements(con):
         st.dataframe([dict(row) for row in rows], use_container_width=True, hide_index=True)
     else:
         st.info("Los ingresos de stock confirmados aparecerán aquí.")
+    duplicates = con.execute("""SELECT d.created_at,d.supplier,d.invoice_no,d.filename,
+        original.id AS original_id FROM receipts d JOIN receipts original ON original.id=d.duplicate_of
+        ORDER BY d.id DESC""").fetchall()
+    if duplicates:
+        st.subheader("Facturas repetidas archivadas · sin cambios de stock")
+        st.dataframe([dict(row) for row in duplicates], use_container_width=True, hide_index=True)
