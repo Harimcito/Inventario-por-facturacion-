@@ -2,7 +2,7 @@
 import sqlite3
 from pathlib import Path
 
-from inventory.text import clean_product_name, normalize_product_key, normalize_rut, normalize_supplier
+from inventory.text import clean_product_name, normalize_product_key, normalize_rut, normalize_supplier, parse_clp, parse_invoice_quantity
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -109,11 +109,26 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
         raise ValueError("Esta factura ya está registrada. Puedes archivarla como repetida sin cambiar el stock.")
     if duplicate_of is not None and (not duplicate or duplicate["id"] != duplicate_of):
         raise ValueError("La factura repetida no coincide con el documento original registrado.")
+    items = list(items or [])
     if duplicate_of is None:
         if not items or any(not str(i.get("nombre", "")).strip() for i in items):
             raise ValueError("Completa la descripción de cada línea de la factura.")
-        if any(str(i.get("line_type", "Mercadería")) == "Mercadería" and int(i["cantidad"]) <= 0 for i in items):
-            raise ValueError("Las unidades de mercadería deben ser mayores que cero.")
+    else:
+        # Puede archivarse una copia ya detectada sin volver a leer sus líneas.
+        items = [i for i in items if str(i.get("nombre", "")).strip()]
+    for item in items:
+        try:
+            qty_value = parse_invoice_quantity(item.get("cantidad", 0))
+            cost_value = parse_clp(item.get("costo_unitario", 0))
+        except (TypeError, ValueError):
+            raise ValueError("Revisa la cantidad y el valor unitario de cada línea.") from None
+        if qty_value < 0 or cost_value < 0:
+            raise ValueError("La cantidad y el valor unitario no pueden ser negativos.")
+        if duplicate_of is None and str(item.get("line_type", "Mercadería")) == "Mercadería":
+            if not qty_value.is_integer():
+                raise ValueError("La mercadería se controla por unidades enteras. Corrige la cantidad antes de guardar.")
+            if qty_value <= 0:
+                raise ValueError("Las unidades de mercadería deben ser mayores que cero.")
 
     document_path.parent.mkdir(parents=True, exist_ok=True)
     with document_path.open("xb") as output:
@@ -132,7 +147,8 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                 name = clean_product_name(item["nombre"])
                 if not name:
                     raise ValueError("El nombre del producto quedó vacío después de limpiarlo.")
-                qty, cost = int(item["cantidad"]), int(item.get("costo_unitario", 0))
+                qty_value = parse_invoice_quantity(item.get("cantidad", 0))
+                qty, cost = (int(qty_value) if qty_value.is_integer() else qty_value), parse_clp(item.get("costo_unitario", 0))
                 line_type = str(item.get("line_type", "Mercadería"))
                 if line_type not in {"Mercadería", "Servicio tecnológico/profesional", "Flete o despacho", "Comisión o recargo", "Impuesto, descuento u otro ajuste"}:
                     raise ValueError("Tipo de línea de factura no reconocido.")
@@ -146,7 +162,7 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                     if product["item_type"] != "Mercadería":
                         raise ValueError("El elemento seleccionado está clasificado como concepto no inventariable.")
                     product_id = product["id"]
-                    if normalize_product_key(name) != normalize_product_key(product["name"]):
+                    if duplicate_of is None and normalize_product_key(name) != normalize_product_key(product["name"]):
                         save_product_alias(con, product_id, name)
                 elif duplicate_of is None:
                     con.execute("INSERT OR IGNORE INTO products(name,stock,cost) VALUES(?,0,?)", (name, cost))
@@ -156,7 +172,11 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                     VALUES(?,?,?,?,?,?,?,?)""",
                     (receipt_id, line_number, name, product_id, qty, cost, qty * cost, line_type))
                 if duplicate_of is None and line_type == "Mercadería":
-                    con.execute("UPDATE products SET stock=stock+?, cost=? WHERE id=?", (qty, cost, product_id))
+                    current = con.execute("SELECT stock,cost FROM products WHERE id=?", (product_id,)).fetchone()
+                    new_stock = int(current["stock"]) + int(qty)
+                    weighted_cost = round((int(current["stock"]) * int(current["cost"]) + int(qty) * cost) / new_stock)
+                    con.execute("UPDATE products SET stock=?,cost=? WHERE id=?",
+                                (new_stock, weighted_cost, product_id))
                     con.execute(
                         "INSERT INTO movements(product_id,receipt_id,quantity,unit_cost) VALUES(?,?,?,?)",
                         (product_id, receipt_id, qty, cost),
