@@ -8,7 +8,7 @@ import streamlit as st
 
 from inventory.database import find_duplicate, record_receipt, update_product, set_product_classification
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key, document_preview
-from inventory.theme import page_header
+from inventory.theme import page_header, flash_on_next_render
 from inventory.text import clean_product_name, normalize_product_key, display_product_name, parse_clp, parse_invoice_quantity
 from inventory.classifier import classify_line, suggest_product_category, LINE_TYPES, MERCHANDISE
 
@@ -107,6 +107,8 @@ def documents(con, docs_dir: Path):
         queue = st.session_state.setdefault("queue", {})
         for error in _add_uploads(uploads, queue):
             st.error(error)
+        if queue:
+            flash_on_next_render(f"{len(queue)} documento(s) listo(s) para revisar", "📄")
         st.rerun()
 
     queue = st.session_state.setdefault("queue", {})
@@ -157,7 +159,7 @@ def documents(con, docs_dir: Path):
                             st.session_state[f"name_{selected}_{index}"] = row.get("nombre", "")
                             st.session_state[f"qty_{selected}_{index}"] = max(0.0, parse_invoice_quantity(row.get("cantidad", 0)))
                             st.session_state[f"cost_{selected}_{index}"] = max(0, parse_clp(row.get("costo_unitario", 0)))
-                        st.success("Lectura lista: revisa datos y cantidades antes de confirmar.")
+                        flash_on_next_render("Lectura lista: revisa los datos antes de confirmar", "✨")
                     else:
                         item["raw"] = local_ocr(item["bytes"], item["source_name"])
                         item["supplier"] = item["supplier"] or (item["raw"].splitlines()[0][:100] if item["raw"].strip() else "")
@@ -252,12 +254,15 @@ def documents(con, docs_dir: Path):
         add, remove_line, remove = st.columns(3)
         if add.button("＋ Agregar producto", key=f"add_{selected}"):
             item["items"].append({"nombre": "", "cantidad": 1, "costo_unitario": 0})
+            flash_on_next_render("Línea nueva lista para completar", "➕")
             st.rerun()
         if remove_line.button("− Quitar última línea", key=f"remove_line_{selected}", disabled=len(edited) <= 1):
             item["items"] = edited[:-1]
+            flash_on_next_render("Se quitó la última línea de esta revisión", "↩️")
             st.rerun()
         if remove.button("Quitar documento", key=f"remove_{selected}"):
             del queue[selected]
+            flash_on_next_render("Documento quitado de la cola de revisión", "🗑️")
             st.rerun()
         duplicate = find_duplicate(con, item)
         if duplicate:
@@ -269,7 +274,7 @@ def documents(con, docs_dir: Path):
                     path = docs_dir / f"{uuid.uuid4().hex}_{Path(item['source_name']).name}"
                     record_receipt(con, item, edited, path, duplicate_of=duplicate["id"])
                     del queue[selected]
-                    st.success("Copia archivada como repetida. No se creó stock ni movimiento.")
+                    flash_on_next_render("Copia archivada. El stock quedó sin cambios", "🗂️")
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -287,7 +292,7 @@ def documents(con, docs_dir: Path):
                 del queue[selected]
                 merchandise_count = sum(row["line_type"] == MERCHANDISE for row in edited)
                 other_count = len(edited) - merchandise_count
-                st.success(f"Factura guardada. {merchandise_count} línea(s) de mercadería ingresaron al inventario; {other_count} línea(s) de servicios o cargos quedaron solo en el detalle.")
+                flash_on_next_render(f"Factura ingresada · {merchandise_count} línea(s) de mercadería sumaron al stock", "📦")
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -315,6 +320,7 @@ def products(con):
                         with con:
                             con.execute("INSERT INTO products(name,category,description,stock,cost,margin,min_stock) VALUES(?,?,?,?,?,?,?)",
                                 (name.strip(), category.strip(), description.strip(), stock, cost, margin, min_stock))
+                        flash_on_next_render(f"{name.strip()} quedó agregado al catálogo", "✨")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar: {exc}")
@@ -341,6 +347,7 @@ def products(con):
                     for p, category in uncategorized:
                         con.execute("UPDATE products SET category=? WHERE id=? AND (category IS NULL OR category='')",
                                     (category, p["id"]))
+                flash_on_next_render(f"Categorías completadas para {len(uncategorized)} producto(s)", "🏷️")
                 st.rerun()
     suggested = [(p, *classify_line(p["name"])) for p in all_active
                  if p["item_type"] == MERCHANDISE and classify_line(p["name"])[0] != MERCHANDISE]
@@ -353,7 +360,7 @@ def products(con):
             if st.button(f"Aplicar las sugerencias a {len(suggested)} concepto(s)", type="primary", key="classify_existing_nonstock"):
                 for p, kind, _ in suggested:
                     set_product_classification(con, p["id"], kind)
-                st.success("Conceptos reclasificados. Sus facturas y ajustes quedaron en el historial.")
+                flash_on_next_render("Conceptos reclasificados y cambios guardados en el historial", "🧹")
                 st.rerun()
     noninventory = [p for p in all_active if p["item_type"] != MERCHANDISE]
     if noninventory:
@@ -364,6 +371,7 @@ def products(con):
                 format_func=lambda p: display_product_name(p["name"]), key="reinclude_noninventory")
             if st.button("Reincorporar al inventario", key="reinclude_inventory_item"):
                 set_product_classification(con, selected_noninventory["id"], MERCHANDISE)
+                flash_on_next_render("Producto reincorporado al inventario", "📦")
                 st.rerun()
     rows = [p for p in all_active if p["item_type"] == MERCHANDISE]
     if not rows:
@@ -409,7 +417,7 @@ def products(con):
                 with con:
                     for pid, _, new in safe_changes:
                         con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
-                st.success("Descripciones corregidas sin cambiar stock ni movimientos.")
+                flash_on_next_render(f"{len(safe_changes)} descripción(es) normalizadas; el stock no cambió", "✍️")
                 st.rerun()
     st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción / variante": p["description"] or "—",
         "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
@@ -448,6 +456,7 @@ def products(con):
                     try:
                         aliases = [alias.strip() for alias in aliases_text.split(",") if alias.strip()]
                         update_product(con, product["id"], name, category, stock, cost, margin, min_stock, reason, description, aliases)
+                        flash_on_next_render(f"Cambios de {name} guardados", "💾")
                         st.rerun()
                     except Exception as exc:
                         st.error(f"No se pudo guardar el producto: {exc}")
