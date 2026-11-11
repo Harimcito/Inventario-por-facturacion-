@@ -10,7 +10,7 @@ import pypdfium2 as pdfium
 import pytesseract
 
 from sii_xml import parse_dtes
-from inventory.text import clean_product_name
+from inventory.text import clean_product_name, parse_invoice_quantity, parse_clp
 
 
 def document_images(data: bytes, filename: str):
@@ -18,6 +18,16 @@ def document_images(data: bytes, filename: str):
         pdf = pdfium.PdfDocument(data)
         return [page.render(scale=1.7).to_pil().convert("RGB") for page in pdf]
     return [Image.open(io.BytesIO(data)).convert("RGB")]
+
+
+def document_preview(data: bytes, filename: str):
+    """Renderiza una sola página para revisión visual, incluso en PDFs extensos."""
+    if filename.lower().endswith(".pdf"):
+        pdf = pdfium.PdfDocument(data)
+        if len(pdf) == 0:
+            raise ValueError("El PDF no contiene páginas.")
+        return pdf[0].render(scale=1.35).to_pil().convert("RGB"), len(pdf)
+    return Image.open(io.BytesIO(data)).convert("RGB"), 1
 
 
 def local_ocr(data: bytes, filename: str) -> str:
@@ -58,7 +68,9 @@ def ai_extract(data: bytes, filename: str, api_key: str):
     )
     data = json.loads(result.choices[0].message.content)
     data["productos"] = [
-        {**item, "nombre": clean_product_name(item.get("nombre", ""))}
+        {**item, "nombre": clean_product_name(item.get("nombre", "")),
+         "cantidad": parse_invoice_quantity(item.get("cantidad", 0)),
+         "costo_unitario": parse_clp(item.get("costo_unitario", 0))}
         for item in data.get("productos", [])
     ]
     return data
