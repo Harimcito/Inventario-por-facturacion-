@@ -11,7 +11,8 @@ from inventory.database import find_duplicate, record_receipt, update_product, s
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key, document_preview
 from inventory.theme import page_header, flash_on_next_render
 from inventory.text import clean_product_name, normalize_product_key, display_product_name, parse_clp, parse_invoice_quantity
-from inventory.classifier import classify_line, suggest_product_category, LINE_TYPES, MERCHANDISE
+from inventory.classifier import (classify_line, suggest_product_category, LINE_TYPES, MERCHANDISE,
+                                  PRODUCT_CATEGORIES, STATIONERY_CATEGORY)
 
 
 def _go_to_section(section: str):
@@ -383,7 +384,8 @@ def products(con):
     with st.expander("＋ Agregar producto"):
         with st.form("new_product"):
             name = st.text_input("Nombre del producto")
-            category = st.text_input("Categoría")
+            category = st.selectbox("Categoría", PRODUCT_CATEGORIES,
+                                    index=PRODUCT_CATEGORIES.index(STATIONERY_CATEGORY))
             description = st.text_input("Descripción / formato / variante", placeholder="Ej.: sabor, tamaño, color o presentación")
             a, b, c = st.columns(3)
             stock = a.number_input("Stock inicial (unidades)", 0, 100000, 0)
@@ -514,7 +516,10 @@ def products(con):
         product = products_by_id[selected_product_id]
         with st.form(f"edit_{product['id']}"):
             name = st.text_input("Nombre del producto", product["name"])
-            category = st.text_input("Categoría", product["category"] or "")
+            category = st.selectbox("Categoría", PRODUCT_CATEGORIES,
+                index=PRODUCT_CATEGORIES.index(product["category"])
+                    if product["category"] in PRODUCT_CATEGORIES
+                    else PRODUCT_CATEGORIES.index(STATIONERY_CATEGORY))
             description = st.text_input("Descripción / formato / variante", product["description"] or "")
             current_aliases = [r[0] for r in con.execute("SELECT alias FROM product_aliases WHERE product_id=? ORDER BY alias", (product["id"],))]
             aliases_text = st.text_input("Nombres alternativos de proveedores (separados por coma)", ", ".join(current_aliases),
