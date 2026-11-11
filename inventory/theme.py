@@ -34,8 +34,14 @@ def apply_brand():
       .stButton button, .stDownloadButton button { border-radius:9px; min-height:42px; font-weight:620; transition:box-shadow .16s ease,transform .16s ease,background .16s ease; }
       .stButton button:hover, .stDownloadButton button:hover { box-shadow:0 5px 14px #17245a1c; transform:translateY(-1px); }
       .stButton button:active, .stDownloadButton button:active { transform:translateY(1px) scale(.985); box-shadow:0 1px 4px #17245a18; }
-      .stButton button[kind="primary"] { color:#081022; background:linear-gradient(115deg,#A9FF74,#65E8CF); border-color:#A9FF74; box-shadow:0 4px 14px #A9FF7430; }
-      .stButton button[kind="primary"]:hover { color:#071020; background:linear-gradient(115deg,#C3FF91,#75F0DD); box-shadow:0 7px 22px #A9FF7452; }
+      .stButton button[kind^="primary"], .stForm button[kind^="primary"] { color:#FFFFFF!important; background:linear-gradient(120deg,#5267F4 0%,#7865F2 100%)!important; border:1px solid #8795FF!important; box-shadow:0 4px 15px #566BFF45,inset 0 1px #FFFFFF35!important; }
+      .stButton button[kind^="primary"] *, .stForm button[kind^="primary"] * { color:#FFFFFF!important; }
+      .stButton button[kind^="primary"]:hover, .stForm button[kind^="primary"]:hover { color:#FFFFFF!important; background:linear-gradient(120deg,#6378FF 0%,#8A75FF 100%)!important; border-color:#B4BEFF!important; box-shadow:0 7px 22px #6579FF70,0 0 0 3px #7488FF20!important; }
+      .stButton button[kind^="primary"]:active, .stForm button[kind^="primary"]:active { background:#4559D8!important; }
+      [data-testid="stForm"] { background:linear-gradient(145deg,#14223B,#111D33); border:1px solid #304260; border-radius:16px; padding:1.15rem; box-shadow:0 10px 28px #02071330; }
+      [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input { background:#101B30!important; color:#F1F4FF!important; border-color:#344665!important; }
+      [data-testid="stTextInput"] label, [data-testid="stNumberInput"] label { color:#D4DDF0!important; font-weight:560; }
+      .stButton button:not([kind^="primary"]), .stForm button:not([kind^="primary"]) { background:#1B2942; color:#DCE5FF; border-color:#43536F; }
       [data-testid="stSidebar"] [role="radiogroup"] label { border-radius:9px; padding:.38rem .5rem; transition:background .15s ease,color .15s ease; }
       [data-testid="stSidebar"] [role="radiogroup"] label:hover { background:#202D4C; }
       [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) { background:linear-gradient(100deg,#26345A,#213C52); color:#D4FFAB; font-weight:680; box-shadow:inset 3px 0 #A9FF74; }
