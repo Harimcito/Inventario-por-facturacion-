@@ -18,6 +18,11 @@ def _go_to_section(section: str):
     st.session_state["app_navigation"] = section
 
 
+def _go_to_restock():
+    st.session_state["products_stock_filter"] = "Requiere reposición"
+    st.session_state["app_navigation"] = "Productos"
+
+
 def dashboard(con):
     products = con.execute("SELECT * FROM products WHERE active=1 AND item_type='Mercadería' ORDER BY name").fetchall()
     receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL").fetchone()["n"]
@@ -26,6 +31,8 @@ def dashboard(con):
     inventory_value = sum(int(p["stock"]) * int(p["cost"]) for p in products)
     unit_count = sum(int(p["stock"]) for p in products)
     low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
+    low_rows = sorted((p for p in products if p["stock"] <= p["min_stock"]),
+                      key=lambda p: (p["stock"] - p["min_stock"], p["name"]))
     month_key = date.today().strftime("%Y-%m")
     month_receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL AND substr(doc_date,1,7)=?", (month_key,)).fetchone()["n"]
     pending_docs = len(st.session_state.get("queue", {}))
@@ -44,7 +51,7 @@ def dashboard(con):
       <div class="ops-hero-copy"><div class="ops-kicker"><span>GIOVAL</span> / CONTROL DE INVENTARIO</div>
         <h2>De factura a stock.<br><em>Todo en orden.</em></h2>
         <p>Recepciona mercadería, revisa cada línea y conserva el historial de lo que entra.</p>
-        <div class="ops-flow"><div><b>01</b><span>DOCUMENTO</span></div><i></i><div><b>02</b><span>REVISIÓN</span></div><i></i><div><b>03</b><span>INVENTARIO</span></div></div>
+        <div class="ops-flow"><div class="flow-step"><b>01</b><span>DOCUMENTOS</span><strong>{month_receipts}</strong></div><i></i><div class="flow-step{' is-active' if pending_docs else ''}"><b>02</b><span>REVISIÓN</span><strong>{pending_docs}</strong></div><i></i><div class="flow-step"><b>03</b><span>STOCK</span><strong>{unit_count}</strong></div></div>
       </div>
       <div class="ops-hero-data"><div class="ops-value-label">VALORIZADO AL COSTO</div>
         <div class="ops-value">{value_label}</div><div class="ops-value-note">{unit_count:,} unidades · {len(products)} productos</div>
@@ -60,7 +67,7 @@ def dashboard(con):
         pass
     note.caption(f"{month_receipts} factura(s) este mes · {pending_docs} en revisión · {low_stock} alerta(s) de stock bajo")
 
-    page_header("Resumen del inventario", "Una vista rápida de las unidades, compras y reposiciones pendientes.")
+    st.markdown('<div class="ops-sectionline"><span>VISTA GENERAL</span><i></i><small>POSICIÓN ACTUAL DEL INVENTARIO</small></div>', unsafe_allow_html=True)
     a, b, c, d = st.columns(4)
     a.metric("Productos activos", len(products))
     b.metric("Unidades en stock", unit_count)
@@ -70,19 +77,21 @@ def dashboard(con):
         st.caption(f"{excluded} servicios, comisiones y ajustes se conservan en sus facturas, fuera del stock.")
     if duplicates:
         st.caption(f"{duplicates} documento(s) repetido(s) archivado(s), sin alterar el inventario.")
-    if low_stock:
-        st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
-        low_rows = sorted((p for p in products if p["stock"] <= p["min_stock"]),
-                          key=lambda p: (p["stock"] - p["min_stock"], p["name"]))
-        with st.expander("Ver productos que necesitan reposición", expanded=False):
-            st.dataframe([{"Producto": display_product_name(p["name"]), "Categoría": p["category"] or "—",
-                "Disponible": p["stock"], "Mínimo definido": p["min_stock"],
-                "Faltan para el mínimo": max(0, p["min_stock"] - p["stock"])} for p in low_rows],
-                column_config={"Producto": st.column_config.TextColumn(width="large"),
-                    "Disponible": st.column_config.NumberColumn(format="%d"),
-                    "Mínimo definido": st.column_config.NumberColumn(format="%d"),
-                    "Faltan para el mínimo": st.column_config.NumberColumn(format="%d")},
-                use_container_width=True, hide_index=True, height=min(360, 38 + 35 * len(low_rows)))
+    if low_rows:
+        restock_rows = "".join(
+            f'<div class="restock-row"><span class="restock-dot"></span><span class="restock-name">{html.escape(display_product_name(p["name"]))}</span>'
+            f'<span class="restock-count">{p["stock"]} <small>/ {p["min_stock"]} u.</small></span></div>'
+            for p in low_rows[:4]
+        )
+        st.markdown(f'''<section class="ops-attention"><div class="attention-head"><div>
+          <span class="attention-kicker">SEÑAL DE REPOSICIÓN</span><h3>{low_stock} producto(s) necesitan atención</h3>
+          </div><span class="attention-count">{low_stock:02d}</span></div>
+          <div class="restock-list">{restock_rows}</div>
+          <div class="attention-foot">El mínimo se define individualmente en cada ficha de producto.</div></section>''', unsafe_allow_html=True)
+        if st.button("Revisar reposiciones", key="open_restock", on_click=_go_to_restock):
+            pass
+    else:
+        st.markdown('<div class="ops-attention is-clear"><div><span class="attention-kicker">SEÑAL DE REPOSICIÓN</span><h3>Todo al día</h3><p>Ningún producto está bajo su mínimo.</p></div><span class="clear-mark">✓</span></div>', unsafe_allow_html=True)
     st.subheader("Stock actual")
     if products:
         s1, s2 = st.columns([2, 1])
