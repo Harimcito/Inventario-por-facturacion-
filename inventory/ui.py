@@ -99,16 +99,22 @@ def dashboard(con):
     if duplicates:
         st.caption(f"{duplicates} documento(s) repetido(s) archivado(s), sin alterar el inventario.")
     if low_rows:
+        restock_units = sum(max(0, int(p["min_stock"]) - int(p["stock"])) for p in low_rows)
+        restock_cost = sum(max(0, int(p["min_stock"]) - int(p["stock"])) * int(p["cost"]) for p in low_rows)
+        format_clp = lambda amount: f"$ {amount:,}".replace(",", ".")
         restock_rows = "".join(
             f'<div class="restock-row"><span class="restock-dot"></span><span class="restock-name">{html.escape(display_product_name(p["name"]))}</span>'
-            f'<span class="restock-count">{p["stock"]} <small>/ {p["min_stock"]} u.</small></span></div>'
-            for p in low_rows[:4]
+            f'<span class="restock-current">{int(p["stock"])} / {int(p["min_stock"])} u.</span>'
+            f'<span class="restock-count">+{max(0, int(p["min_stock"]) - int(p["stock"]))} u.<small>{format_clp(max(0, int(p["min_stock"]) - int(p["stock"])) * int(p["cost"]))}</small></span></div>'
+            for p in low_rows[:6]
         )
+        more_items = f'<div class="attention-foot">Y {len(low_rows) - 6} producto(s) más en la lista de reposición.</div>' if len(low_rows) > 6 else ""
         st.markdown(f'''<section class="ops-attention"><div class="attention-head"><div>
           <span class="attention-kicker">SEÑAL DE REPOSICIÓN</span><h3>{low_stock} producto(s) necesitan atención</h3>
+          <div class="restock-summary">Para llegar al mínimo: <strong>{restock_units} unidades</strong><i>·</i> costo referencial <strong>{format_clp(restock_cost)}</strong></div>
           </div><span class="attention-count">{low_stock:02d}</span></div>
           <div class="restock-list">{restock_rows}</div>
-          <div class="attention-foot">El mínimo se define individualmente en cada ficha de producto.</div></section>''', unsafe_allow_html=True)
+          {more_items}<div class="attention-foot">Estimación al costo unitario registrado; no modifica el stock.</div></section>''', unsafe_allow_html=True)
         if st.button("Revisar reposiciones", key="open_restock", on_click=_go_to_restock):
             pass
     else:
@@ -634,5 +640,4 @@ def exports(con, root: Path):
     if "inventory_backup" in st.session_state:
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         st.download_button("Descargar respaldo ZIP", st.session_state["inventory_backup"], f"respaldo_inventario_{stamp}.zip", "application/zip")
-
 
