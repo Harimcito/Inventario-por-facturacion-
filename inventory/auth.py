@@ -59,6 +59,7 @@ def render_login(root: Path) -> bool:
         account = _read(path)
 
     if account is None:
+        st.markdown('<div class="login-brand"><span class="login-brand-mark">G</span><span>GIOVAL / INVENTARIO</span></div>', unsafe_allow_html=True)
         st.markdown("### Configura el acceso privado")
         st.write("Crea el usuario y la contraseña que protegerán este inventario. La contraseña se guarda como hash local.")
         with st.form("initial_account", clear_on_submit=False):
@@ -102,6 +103,7 @@ def render_login(root: Path) -> bool:
     st.session_state.pop("_inventory_auth_version", None)
     st.session_state.pop("_inventory_last_activity", None)
 
+    st.markdown('<div class="login-brand"><span class="login-brand-mark">G</span><span>GIOVAL / INVENTARIO</span></div>', unsafe_allow_html=True)
     st.markdown("### Iniciar sesión")
     st.write("Ingresa tus credenciales para abrir el inventario.")
     locked_for = max(0, int(account.get("locked_until", 0) - now))
@@ -185,3 +187,4 @@ def render_security_sidebar(root: Path):
                         _write(path, account)
                         st.session_state["_inventory_auth_version"] = account["version"]
                         st.success("Contraseña actualizada. Las otras sesiones deberán volver a iniciar sesión.")
+
