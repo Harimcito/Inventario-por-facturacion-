@@ -7,9 +7,9 @@ from datetime import date
 import streamlit as st
 
 from inventory.database import find_duplicate, record_receipt, update_product, set_product_classification
-from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key
+from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key, document_preview
 from inventory.theme import page_header
-from inventory.text import clean_product_name, normalize_product_key, display_product_name
+from inventory.text import clean_product_name, normalize_product_key, display_product_name, parse_clp, parse_invoice_quantity
 from inventory.classifier import classify_line, suggest_product_category, LINE_TYPES, MERCHANDISE
 
 
@@ -19,13 +19,16 @@ def dashboard(con):
     duplicates = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NOT NULL").fetchone()["n"]
     excluded = con.execute("SELECT COUNT(*) AS n FROM products WHERE active=1 AND item_type<>'Mercadería'").fetchone()["n"]
     page_header("Inventario de mercadería", "Compras recibidas, unidades disponibles y precios sugeridos.")
+    inventory_value = sum(int(p["stock"]) * int(p["cost"]) for p in products)
     a, b, c, d = st.columns(4)
     a.metric("Productos activos", len(products))
     b.metric("Unidades en stock", sum(p["stock"] for p in products))
-    c.metric("Facturas registradas", receipts)
-    d.metric("Repetidas archivadas", duplicates)
+    c.metric("Valorizado al costo", f"$ {inventory_value:,}".replace(",", "."))
+    d.metric("Facturas registradas", receipts)
     if excluded:
         st.caption(f"{excluded} servicios, comisiones y ajustes se conservan en sus facturas, fuera del stock.")
+    if duplicates:
+        st.caption(f"{duplicates} documento(s) repetido(s) archivado(s), sin alterar el inventario.")
     low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
     if low_stock:
         st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
@@ -100,8 +103,15 @@ def documents(con, docs_dir: Path):
     original, review = st.columns([.85, 1.35], gap="large")
     with original:
         st.subheader("Documento original")
-        if item["source_name"].lower().endswith((".jpg", ".jpeg", ".png")):
-            st.image(item["bytes"], use_container_width=True)
+        if item["source_name"].lower().endswith((".jpg", ".jpeg", ".png", ".pdf")):
+            try:
+                preview, page_count = document_preview(item["bytes"], item["source_name"])
+                st.image(preview, use_container_width=True)
+                if page_count > 1:
+                    st.caption(f"Vista previa de la página 1 de {page_count}.")
+            except Exception as exc:
+                st.warning(f"No pude mostrar una vista previa: {str(exc)[:160]}")
+            st.download_button("Descargar archivo original", item["bytes"], file_name=item["source_name"])
         else:
             st.download_button("Descargar archivo original", item["bytes"], file_name=item["source_name"])
         if item.get("dte"):
@@ -126,8 +136,8 @@ def documents(con, docs_dir: Path):
                         st.session_state[f"date_{selected}"] = item["date"]
                         for index, row in enumerate(item["items"]):
                             st.session_state[f"name_{selected}_{index}"] = row.get("nombre", "")
-                            st.session_state[f"qty_{selected}_{index}"] = max(0, int(float(row.get("cantidad") or 1)))
-                            st.session_state[f"cost_{selected}_{index}"] = max(0, int(float(row.get("costo_unitario") or 0)))
+                            st.session_state[f"qty_{selected}_{index}"] = max(0.0, parse_invoice_quantity(row.get("cantidad", 0)))
+                            st.session_state[f"cost_{selected}_{index}"] = max(0, parse_clp(row.get("costo_unitario", 0)))
                         st.success("Lectura lista: revisa datos y cantidades antes de confirmar.")
                     else:
                         item["raw"] = local_ocr(item["bytes"], item["source_name"])
@@ -171,10 +181,10 @@ def documents(con, docs_dir: Path):
                 else:
                     st.caption(f"Clasificación modificada manualmente. La sugerencia por descripción era: {suggested_type}.")
                 c1, c2 = st.columns([.8, 1.2])
-                quantity = c1.number_input("Unidades/cantidad", min_value=0, max_value=100000,
-                    value=max(0, int(float(row.get("cantidad") or 1))), step=1, key=f"qty_{selected}_{index}")
+                quantity = c1.number_input("Unidades/cantidad", min_value=0.0, max_value=100000.0,
+                    value=max(0.0, parse_invoice_quantity(row.get("cantidad", 1))), step=1.0, key=f"qty_{selected}_{index}")
                 cost = c2.number_input("Valor unitario", min_value=0, max_value=100000000,
-                    value=max(0, int(float(row.get("costo_unitario") or 0))), step=100, key=f"cost_{selected}_{index}")
+                    value=max(0, parse_clp(row.get("costo_unitario", 0))), step=100, key=f"cost_{selected}_{index}")
                 mapping = None
                 if selected_type == MERCHANDISE:
                     normalized_name = normalize_product_key(name)
@@ -203,14 +213,29 @@ def documents(con, docs_dir: Path):
                         st.caption("Si confirmas, esta línea creará un producto nuevo en el catálogo.")
                     elif normalize_product_key(name) != normalize_product_key(next(p["name"] for p in catalog if p["id"] == mapping)):
                         st.caption("Al confirmar, este nombre de factura se guardará como alias para facilitar futuras coincidencias.")
+                    mapped_product = next((p for p in catalog if p["id"] == mapping), None)
+                    if mapped_product and cost > 0 and mapped_product["cost"] > 0:
+                        low, high = sorted((int(cost), int(mapped_product["cost"])))
+                        if high >= low * 3:
+                            invoice_cost = f"$ {int(cost):,}".replace(",", ".")
+                            current_cost = f"$ {int(mapped_product['cost']):,}".replace(",", ".")
+                            st.warning(
+                                f"El costo de esta factura ({invoice_cost}) difiere mucho del costo actual de "
+                                f"{mapped_product['name']} ({current_cost}). Verifica que sea la misma variante antes de confirmar."
+                            )
                 else:
                     st.info("Se conservará en el detalle de la factura y no se ingresará al stock.")
+                if selected_type == MERCHANDISE and not float(quantity).is_integer():
+                    st.warning("El inventario usa unidades enteras. Ajusta esta cantidad antes de confirmar, o clasifica la línea como no inventariable.")
                 edited.append({"nombre": name, "cantidad": quantity, "costo_unitario": cost,
                                "product_id": mapping, "line_type": selected_type})
         item["supplier"], item["number"], item["date"], item["items"] = supplier, number, doc_date, edited
-        add, remove = st.columns(2)
+        add, remove_line, remove = st.columns(3)
         if add.button("＋ Agregar producto", key=f"add_{selected}"):
             item["items"].append({"nombre": "", "cantidad": 1, "costo_unitario": 0})
+            st.rerun()
+        if remove_line.button("− Quitar última línea", key=f"remove_line_{selected}", disabled=len(edited) <= 1):
+            item["items"] = edited[:-1]
             st.rerun()
         if remove.button("Quitar documento", key=f"remove_{selected}"):
             del queue[selected]
@@ -250,7 +275,7 @@ def documents(con, docs_dir: Path):
 
 
 def products(con):
-    page_header("Productos", "Administra el catálogo, unidades disponibles, costos y márgenes.")
+    page_header("Productos", "Administra el catálogo, stock, costo promedio y margen sugerido.")
     with st.expander("＋ Agregar producto"):
         with st.form("new_product"):
             name = st.text_input("Nombre del producto")
@@ -274,6 +299,17 @@ def products(con):
                     except Exception as exc:
                         st.error(f"No se pudo guardar: {exc}")
     all_active = con.execute("SELECT * FROM products WHERE active=1 ORDER BY name").fetchall()
+    cost_alerts = con.execute("""SELECT p.id,p.name,MIN(m.unit_cost) AS min_cost,MAX(m.unit_cost) AS max_cost,
+        COUNT(*) AS purchases FROM products p JOIN movements m ON m.product_id=p.id
+        WHERE p.active=1 AND p.item_type='Mercadería' AND m.unit_cost>0
+        GROUP BY p.id HAVING MAX(m.unit_cost)>=MIN(m.unit_cost)*3 ORDER BY p.name""").fetchall()
+    if cost_alerts:
+        with st.expander(f"Revisar costos o variantes ({len(cost_alerts)})", expanded=True):
+            st.caption("Hay productos con compras registradas a precios muy distintos. Puede ser una lectura incorrecta o variantes que conviene separar; revisa antes de editar el costo actual.")
+            st.dataframe([{"Producto": display_product_name(p["name"]),
+                "Costo menor registrado": f"$ {int(p['min_cost']):,}".replace(",", "."),
+                "Costo mayor registrado": f"$ {int(p['max_cost']):,}".replace(",", "."),
+                "Compras": p["purchases"]} for p in cost_alerts], use_container_width=True, hide_index=True)
     uncategorized = [(p, suggest_product_category(p["name"])) for p in all_active
                      if p["item_type"] == MERCHANDISE and not p["category"] and suggest_product_category(p["name"])]
     if uncategorized:
