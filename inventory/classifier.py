@@ -8,6 +8,9 @@ FREIGHT = "Flete o despacho"
 FEE = "Comisión o recargo"
 ADJUSTMENT = "Impuesto, descuento u otro ajuste"
 LINE_TYPES = [MERCHANDISE, SERVICE, FREIGHT, FEE, ADJUSTMENT]
+PRINTING_CATEGORY = "Tinta e impresión"
+STATIONERY_CATEGORY = "Librería"
+PRODUCT_CATEGORIES = [PRINTING_CATEGORY, STATIONERY_CATEGORY]
 
 _RULES = [
     (FEE, r"\b(comision|comisiones|cargo por|recargo|interes|intereses|gasto de cobranza|tarifa de servicio|fee|cargo bancario)\b"),
@@ -30,15 +33,12 @@ def classify_line(description: str) -> tuple[str, str]:
 
 
 def suggest_product_category(description: str) -> str:
-    """Sugiere una categoría útil para el catálogo sin depender de una API."""
+    """Clasifica mercadería exclusivamente en las dos categorías del catálogo."""
     from inventory.text import normalize_product_key
     key = normalize_product_key(description)
-    if any(term in key for term in ("papel", "foto", "carpeta", "carpc", "cartulina", "corchetera", "sacacorchete", "sacapunta",
-                                    "lapiz", "formulario", "elastico", "portaclips", "portala")):
-        return "Oficina y papelería"
-    if any(term in key for term in ("mouse", "teclado", "keyboard", "cable", "switch", "fuentedepoder", "alargador", "usb")):
-        return "Tecnología y accesorios"
-    if "afilador" in key or "sierra" in key:
-        return "Herramientas"
-    return ""
+    print_terms = ("fotocopia", "fotograf", "semibrillo", "papelfoto", "tinta", "toner",
+                   "cartucho", "impresion", "inkjet", "laserjet")
+    if any(term in key for term in print_terms):
+        return PRINTING_CATEGORY
+    return STATIONERY_CATEGORY
 
