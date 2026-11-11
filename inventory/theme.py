@@ -32,8 +32,12 @@ def apply_brand():
       [data-testid="stVerticalBlockBorderWrapper"] { border-radius:14px; border-color:#304361!important; background:linear-gradient(145deg,#182742B8,#121F36D9); }
       [data-testid="stAlert"] { border-radius:12px; animation:soft-appear .24s ease-out both; background:#1B2942; }
       .stButton button, .stDownloadButton button { border-radius:9px; min-height:42px; font-weight:620; transition:box-shadow .16s ease,transform .16s ease,background .16s ease; }
+      .stButton button, .stDownloadButton button, [data-testid="stFormSubmitButton"] button { position:relative; isolation:isolate; overflow:hidden; }
       .stButton button:hover, .stDownloadButton button:hover { box-shadow:0 5px 14px #17245a1c; transform:translateY(-1px); }
       .stButton button:active, .stDownloadButton button:active { transform:translateY(1px) scale(.985); box-shadow:0 1px 4px #17245a18; }
+      .stButton button:active::after, .stDownloadButton button:active::after, [data-testid="stFormSubmitButton"] button:active::after { content:""; position:absolute; left:50%; top:50%; width:10px; height:10px; border-radius:50%; background:#FFFFFF70; transform:translate(-50%,-50%); animation:button-ripple .42s ease-out; z-index:0; pointer-events:none; }
+      .stButton button > div, .stDownloadButton button > div, [data-testid="stFormSubmitButton"] button > div { position:relative; z-index:1; }
+      .stButton button:focus-visible, .stDownloadButton button:focus-visible, [data-testid="stFormSubmitButton"] button:focus-visible { outline:3px solid #59DDF5!important; outline-offset:3px; }
       .stButton button[kind^="primary"], .stForm button[kind^="primary"] { color:#FFFFFF!important; background:linear-gradient(120deg,#5267F4 0%,#7865F2 100%)!important; border:1px solid #8795FF!important; box-shadow:0 4px 15px #566BFF45,inset 0 1px #FFFFFF35!important; }
       .stButton button[kind^="primary"] *, .stForm button[kind^="primary"] * { color:#FFFFFF!important; }
       .stButton button[kind^="primary"]:hover, .stForm button[kind^="primary"]:hover { color:#FFFFFF!important; background:linear-gradient(120deg,#6378FF 0%,#8A75FF 100%)!important; border-color:#B4BEFF!important; box-shadow:0 7px 22px #6579FF70,0 0 0 3px #7488FF20!important; }
@@ -46,9 +50,13 @@ def apply_brand():
       [data-testid="stSidebar"] [role="radiogroup"] label:hover { background:#202D4C; }
       [data-testid="stSidebar"] [role="radiogroup"] label:has(input:checked) { background:linear-gradient(100deg,#26345A,#213C52); color:#D4FFAB; font-weight:680; box-shadow:inset 3px 0 #A9FF74; }
       input:focus, textarea:focus { border-color:#A9FF74!important; box-shadow:0 0 0 3px #A9FF7426!important; }
-      .gioval-eyebrow { color:#D5FFB0!important; background:linear-gradient(100deg,#27385C,#1A4050); border:1px solid #49617B; display:inline-flex; align-items:center; padding:.3rem .68rem; border-radius:999px; font-size:.69rem; font-weight:760; letter-spacing:.11em; text-transform:uppercase; margin-bottom:.5rem; opacity:1!important; }
+      .gioval-eyebrow { color:#D5FFB0!important; background:linear-gradient(100deg,#27385C,#1A4050); border:1px solid #49617B; display:inline-flex; align-items:center; gap:.48rem; padding:.3rem .68rem .3rem .35rem; border-radius:999px; font-size:.69rem; font-weight:760; letter-spacing:.11em; text-transform:uppercase; margin-bottom:.5rem; opacity:1!important; }
+      .gioval-mark { width:21px; height:21px; display:inline-grid; place-items:center; border-radius:7px; color:#0B1530!important; background:linear-gradient(135deg,#B9FF74,#59DDF5); font-size:.82rem; font-weight:900; letter-spacing:-.08em; box-shadow:0 0 14px #59DDF544; }
+      .login-brand { display:flex; align-items:center; gap:.7rem; color:#DDE6FF; font-size:.75rem; font-weight:760; letter-spacing:.14em; margin:0 0 1.25rem; }
+      .login-brand-mark { width:38px; height:38px; display:grid; place-items:center; border-radius:12px 12px 12px 4px; background:linear-gradient(135deg,#B9FF74,#59DDF5); color:#0A142A; font-size:1.3rem; font-weight:900; letter-spacing:-.1em; box-shadow:0 5px 20px #59DDF533; }
       @keyframes page-enter { from { opacity:.82; transform:translateY(5px); } to { opacity:1; transform:translateY(0); } }
       @keyframes soft-appear { from { opacity:.65; } to { opacity:1; } }
+      @keyframes button-ripple { from { width:10px;height:10px;opacity:.55; } to { width:180px;height:180px;opacity:0; } }
       @media(prefers-reduced-motion:reduce) { *,*::before,*::after { animation-duration:.01ms!important; transition-duration:.01ms!important; scroll-behavior:auto!important; } }
       @media(max-width:900px) { .block-container { padding:1.45rem 1rem 2.25rem; } [data-testid="stMetric"] { min-height:92px; padding:.85rem; } }
       @media(max-width:700px) { .block-container { padding:1.15rem .75rem 1.75rem; } h2 { font-size:1.2rem!important; } }
@@ -57,7 +65,18 @@ def apply_brand():
 
 
 def page_header(title: str, description: str):
-    st.markdown('<div class="gioval-eyebrow">GIOVAL · OPERACIONES</div>', unsafe_allow_html=True)
+    st.markdown('<div class="gioval-eyebrow"><span class="gioval-mark">G</span> GIOVAL · OPERACIONES</div>', unsafe_allow_html=True)
     st.title(title)
     st.caption(description)
+
+
+def flash_on_next_render(message: str, icon: str = "✅"):
+    """Conserva una confirmación cuando una acción termina en rerun."""
+    st.session_state["_gioval_flash"] = {"message": message, "icon": icon}
+
+
+def show_flash():
+    notice = st.session_state.pop("_gioval_flash", None)
+    if notice:
+        st.toast(notice["message"], icon=notice.get("icon", "✅"))
 
