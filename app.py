@@ -18,13 +18,14 @@ for module in (inventory_text, inventory_classifier, inventory_database,
 
 from inventory.database import connect
 from inventory.auth import render_login, render_security_sidebar
-from inventory.theme import apply_brand
+from inventory.theme import apply_brand, show_flash
 from inventory.ui import dashboard, documents, movements, products, receipts, exports
 
 ROOT = Path(__file__).resolve().parent
 apply_brand()
 if not render_login(ROOT):
     st.stop()
+show_flash()
 con = connect(ROOT / "inventario.db")
 render_security_sidebar(ROOT)
 
