@@ -51,8 +51,8 @@ def dashboard(con):
     excluded = con.execute("SELECT COUNT(*) AS n FROM products WHERE active=1 AND item_type<>'Mercadería'").fetchone()["n"]
     inventory_value = sum(int(p["stock"]) * int(p["cost"]) for p in products)
     unit_count = sum(int(p["stock"]) for p in products)
-    low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
-    low_rows = sorted((p for p in products if p["stock"] <= p["min_stock"]),
+    low_stock = sum(p["stock"] < p["min_stock"] for p in products)
+    low_rows = sorted((p for p in products if p["stock"] < p["min_stock"]),
                       key=lambda p: (p["stock"] - p["min_stock"], p["name"]))
     month_key = date.today().strftime("%Y-%m")
     month_receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL AND substr(doc_date,1,7)=?", (month_key,)).fetchone()["n"]
@@ -478,7 +478,7 @@ def products(con):
     if catalog_category != "Todas":
         rows = [p for p in rows if p["category"] == catalog_category]
     if stock_filter == "Requiere reposición":
-        rows = [p for p in rows if p["stock"] <= p["min_stock"]]
+        rows = [p for p in rows if p["stock"] < p["min_stock"]]
     elif stock_filter == "Sobre el mínimo":
         rows = [p for p in rows if p["stock"] > p["min_stock"]]
     st.caption(f"{len(rows)} producto(s) en la vista")
@@ -640,4 +640,5 @@ def exports(con, root: Path):
     if "inventory_backup" in st.session_state:
         stamp = datetime.now().strftime("%Y%m%d_%H%M")
         st.download_button("Descargar respaldo ZIP", st.session_state["inventory_backup"], f"respaldo_inventario_{stamp}.zip", "application/zip")
+
 
