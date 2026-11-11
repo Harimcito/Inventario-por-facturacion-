@@ -105,10 +105,13 @@ def dashboard(con):
             "Costo unitario": f"$ {p['cost']:,}".replace(",", "."), "Margen": f"{p['margin']:g}%",
             "Precio sugerido": f"$ {round(p['cost']*(1+p['margin']/100)):,}".replace(",", ".")}
             for p in visible], column_config={
-                "Producto": st.column_config.TextColumn(width="large"),
-                "Categoría": st.column_config.TextColumn(width="medium"),
+                "Producto": st.column_config.TextColumn(width=250, pinned="left"),
+                "Categoría": st.column_config.TextColumn(width=135),
                 "Unidades": st.column_config.NumberColumn(format="%d"),
-            }, use_container_width=True, hide_index=True, height=min(560, 38 + 35 * max(1, len(visible))))
+                "Costo unitario": st.column_config.TextColumn(width=125),
+                "Margen": st.column_config.TextColumn(width=85),
+                "Precio sugerido": st.column_config.TextColumn(width=130),
+            }, width="stretch", hide_index=True, height="auto", row_height=42)
     else:
         st.info("Tu catálogo aparecerá aquí cuando confirmes una factura o agregues un producto.")
 
@@ -399,13 +402,13 @@ def products(con):
             st.dataframe([{"Producto": display_product_name(p["name"]),
                 "Costo menor registrado": f"$ {int(p['min_cost']):,}".replace(",", "."),
                 "Costo mayor registrado": f"$ {int(p['max_cost']):,}".replace(",", "."),
-                "Compras": p["purchases"]} for p in cost_alerts], use_container_width=True, hide_index=True)
+                "Compras": p["purchases"]} for p in cost_alerts], width="stretch", height="auto", row_height=42, hide_index=True)
     uncategorized = [(p, suggest_product_category(p["name"])) for p in all_active
                      if p["item_type"] == MERCHANDISE and not p["category"] and suggest_product_category(p["name"])]
     if uncategorized:
         with st.expander(f"Completar categorías del catálogo ({len(uncategorized)})", expanded=False):
             st.dataframe([{"Producto": display_product_name(p["name"]), "Categoría sugerida": category}
-                          for p, category in uncategorized], use_container_width=True, hide_index=True)
+                          for p, category in uncategorized], width="stretch", height="auto", row_height=42, hide_index=True)
             if st.button("Aplicar categorías sugeridas", key="apply_product_categories"):
                 with con:
                     for p, category in uncategorized:
@@ -420,7 +423,7 @@ def products(con):
             st.caption("La app conserva la factura, pero estos conceptos no deberían contar como mercadería. Aplicar la sugerencia deja su saldo en cero y registra el ajuste.")
             st.dataframe([{"Descripción detectada": display_product_name(p["name"]), "Tipo sugerido": kind,
                 "Unidades a retirar del stock": p["stock"], "Motivo": reason} for p, kind, reason in suggested],
-                use_container_width=True, hide_index=True)
+                width="stretch", height="auto", row_height=42, hide_index=True)
             if st.button(f"Aplicar las sugerencias a {len(suggested)} concepto(s)", type="primary", key="classify_existing_nonstock"):
                 for p, kind, _ in suggested:
                     set_product_classification(con, p["id"], kind)
@@ -430,7 +433,7 @@ def products(con):
     if noninventory:
         with st.expander(f"Conceptos excluidos del inventario ({len(noninventory)})", expanded=False):
             st.dataframe([{"Descripción": display_product_name(p["name"]), "Clasificación": p["item_type"]}
-                          for p in noninventory], use_container_width=True, hide_index=True)
+                          for p in noninventory], width="stretch", height="auto", row_height=42, hide_index=True)
             selected_noninventory = st.selectbox("Reincorporar como mercadería", noninventory,
                 format_func=lambda p: display_product_name(p["name"]), key="reinclude_noninventory")
             if st.button("Reincorporar al inventario", key="reinclude_inventory_item"):
@@ -474,7 +477,7 @@ def products(con):
                 safe_changes.append((pid, old, new))
         with st.expander(f"Revisar descripciones para corregir ({len(changes)})", expanded=False):
             st.caption("Vista previa de espacios entre letras y signos de lectura erróneos. Los nombres con posible conflicto se dejan intactos.")
-            st.dataframe([{"Actual": old, "Corregido": new} for _, old, new in changes], use_container_width=True, hide_index=True)
+            st.dataframe([{"Actual": old, "Corregido": new} for _, old, new in changes], width="stretch", height="auto", row_height=42, hide_index=True)
             if conflicts:
                 st.warning("Algunos nombres coincidirían con otro producto y no se cambiarán automáticamente.")
             if safe_changes and st.button(f"Aplicar {len(safe_changes)} corrección(es)", key="clean_product_names"):
@@ -489,12 +492,15 @@ def products(con):
         "Costo unitario": f"$ {p['cost']:,}".replace(",", "."),
         "Precio sugerido": f"$ {round(p['cost'] * (1 + p['margin'] / 100)):,}".replace(",", ".")}
         for p in rows], column_config={
-            "Producto": st.column_config.TextColumn(width="large"),
-            "Descripción / variante": st.column_config.TextColumn(width="medium"),
-            "Categoría": st.column_config.TextColumn(width="medium"),
+            "Producto": st.column_config.TextColumn(width=230, pinned="left"),
+            "Descripción / variante": st.column_config.TextColumn(width=180),
+            "Categoría": st.column_config.TextColumn(width=125),
             "Unidades": st.column_config.NumberColumn(format="%d"),
             "Mínimo": st.column_config.NumberColumn(format="%d"),
-        }, use_container_width=True, hide_index=True, height=min(600, 38 + 35 * len(rows)))
+            "Margen": st.column_config.TextColumn(width=82),
+            "Costo unitario": st.column_config.TextColumn(width=120),
+            "Precio sugerido": st.column_config.TextColumn(width=125),
+        }, width="stretch", hide_index=True, height="auto", row_height=44)
     with st.expander("Editar producto"):
         product = st.selectbox("Producto", rows, format_func=lambda p: display_product_name(p["name"]))
         with st.form(f"edit_{product['id']}"):
@@ -532,14 +538,14 @@ def movements(con):
         FROM movements m JOIN products p ON p.id=m.product_id JOIN receipts r ON r.id=m.receipt_id
         WHERE p.item_type='Mercadería' ORDER BY m.id DESC""").fetchall()
     if rows:
-        st.dataframe([dict(row) for row in rows], use_container_width=True, hide_index=True)
+        st.dataframe([dict(row) for row in rows], width="stretch", height="auto", row_height=42, hide_index=True)
     else:
         st.info("Los ingresos de stock confirmados aparecerán aquí.")
     adjustments = con.execute("""SELECT a.created_at,p.name,a.old_stock,a.new_stock,a.delta,a.reason
         FROM inventory_adjustments a JOIN products p ON p.id=a.product_id ORDER BY a.id DESC""").fetchall()
     st.subheader("Ajustes manuales de stock")
     if adjustments:
-        st.dataframe([dict(row) for row in adjustments], use_container_width=True, hide_index=True)
+        st.dataframe([dict(row) for row in adjustments], width="stretch", height="auto", row_height=42, hide_index=True)
     else:
         st.caption("Los cambios manuales quedarán registrados aquí con su motivo.")
     duplicates = con.execute("""SELECT d.created_at,d.supplier,d.invoice_no,d.filename,
@@ -547,7 +553,7 @@ def movements(con):
         ORDER BY d.id DESC""").fetchall()
     if duplicates:
         st.subheader("Facturas repetidas archivadas · sin cambios de stock")
-        st.dataframe([dict(row) for row in duplicates], use_container_width=True, hide_index=True)
+        st.dataframe([dict(row) for row in duplicates], width="stretch", height="auto", row_height=42, hide_index=True)
 
 
 def receipts(con, docs_dir: Path):
@@ -567,7 +573,7 @@ def receipts(con, docs_dir: Path):
         st.info("Aún no hay documentos que coincidan."); return
     st.dataframe([{"Fecha": r["doc_date"], "Proveedor": r["supplier"], "Folio": r["invoice_no"],
         "Estado": "Repetida · no suma stock" if r["duplicate_of"] else "Ingresada",
-        "Total": r["total_amount"], "Archivo": r["filename"]} for r in rows], use_container_width=True, hide_index=True)
+        "Total": r["total_amount"], "Archivo": r["filename"]} for r in rows], width="stretch", height="auto", row_height=42, hide_index=True)
     choice = st.selectbox("Ver detalle de factura", rows,
         format_func=lambda r: f"{r['doc_date']} · {r['supplier']} · Folio {r['invoice_no']}" + (" · REPETIDA" if r["duplicate_of"] else ""))
     lines = con.execute("""SELECT l.line_number,l.original_description,l.line_type,p.name AS producto,l.quantity,l.unit_cost,l.line_total
@@ -576,7 +582,7 @@ def receipts(con, docs_dir: Path):
         st.dataframe([{"Línea": x["line_number"], "Descripción factura": display_product_name(x["original_description"]),
             "Clasificación": x["line_type"], "Producto del catálogo": display_product_name(x["producto"]) if x["producto"] else "—",
             "Cantidad": x["quantity"], "Valor unitario": x["unit_cost"], "Total línea": x["line_total"]}
-            for x in lines], use_container_width=True, hide_index=True)
+            for x in lines], width="stretch", height="auto", row_height=42, hide_index=True)
     file_path = docs_dir / (choice["stored_filename"] or "")
     if file_path.is_file():
         st.download_button("Descargar documento original", file_path.read_bytes(), file_name=choice["filename"] or file_path.name)
