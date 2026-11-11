@@ -98,12 +98,17 @@ def apply_brand():
       .attention-head h3,.ops-attention h3 { color:#F3F4F8; margin:.27rem 0 .65rem; font-size:1rem; }
       .attention-count { color:#D59AB5; font-size:1.7rem; font-weight:760; letter-spacing:-.06em; }
       .restock-list { display:grid; grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); gap:.3rem .85rem; }
-      .restock-row { display:flex; align-items:center; gap:.45rem; min-width:0; padding:.4rem 0; border-top:1px solid #252731; }
+      .restock-summary { display:flex; flex-wrap:wrap; align-items:center; gap:.3rem; margin:-.35rem 0 .75rem; color:#9B9EAA; font-size:.72rem; }
+      .restock-summary strong { color:#E8D7E3; font-weight:700; }
+      .restock-summary i { color:#666B79; font-style:normal; }
+      .restock-row { display:flex; align-items:center; gap:.45rem; min-width:0; padding:.42rem 0; border-top:1px solid #252731; }
       .restock-dot { width:6px; height:6px; flex:none; border-radius:50%; background:#C0729B; box-shadow:0 0 8px #C0729B66; }
       .restock-name { overflow:hidden; color:#C8CAD3; font-size:.76rem; text-overflow:ellipsis; white-space:nowrap; }
-      .restock-count { margin-left:auto; flex:none; color:#F3F4F8; font-size:.75rem; font-weight:700; }
-      .restock-count small { color:#858997; font-size:.68rem; font-weight:500; }
+      .restock-current { flex:none; color:#858997; font-size:.68rem; font-variant-numeric:tabular-nums; }
+      .restock-count { display:flex; flex-direction:column; align-items:flex-end; margin-left:.2rem; flex:none; color:#F3F4F8; font-size:.75rem; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.15; }
+      .restock-count small { margin-top:.15rem; color:#858997; font-size:.63rem; font-weight:500; }
       .attention-foot { margin-top:.45rem; color:#777C8A; font-size:.68rem; }
+      @media(max-width:650px) { .restock-list { grid-template-columns:1fr; } .restock-summary { gap:.2rem; } .restock-current { margin-left:auto; } }
       .ops-attention.is-clear { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.1rem; border-color:#2C3844; border-left-color:#6578A7; background:linear-gradient(100deg,#11131B,#111722); }
       .ops-attention.is-clear h3 { margin:.2rem 0 .15rem; }
       .ops-attention.is-clear p { margin:0; color:#8C929F; font-size:.76rem; }
@@ -185,6 +190,7 @@ def apply_brand():
       .ops-attention { border-color:#493347!important; border-left-color:#B66BBD!important; background:radial-gradient(ellipse at 100% 0%,#B66BBD17,transparent 48%),linear-gradient(120deg,#151522,#10131D)!important; box-shadow:0 10px 28px #0000002A; }
       .attention-kicker { color:#C694D0!important; font-family:ui-monospace,Consolas,monospace; }
       .attention-count { color:#D5A3E1!important; }
+      .restock-summary strong { color:#F0D7F4!important; }
       .restock-dot { background:#C478D4!important; box-shadow:0 0 10px #B66BBD77!important; }
       .ops-attention.is-clear { border-color:#244258!important; border-left-color:#37BEDA!important; background:linear-gradient(100deg,#101923,#0D1720)!important; }
       .clear-mark { color:#63CDE4!important; border-color:#315467!important; }
@@ -264,6 +270,7 @@ def apply_brand():
       .ops-sectionline i { background:linear-gradient(90deg,#A484FF70,#55F2D140,transparent)!important; height:2px!important; }
       .ops-attention { border:1px solid #FF8DB45C!important; border-left:4px solid #FF8DB4!important; border-radius:14px!important; background:radial-gradient(ellipse at 100% 0%,#FF559B22,transparent 48%),linear-gradient(115deg,#28192C,#19172A)!important; }
       .attention-kicker,.attention-count,.restock-dot { color:#FF9BBB!important; }
+      .restock-summary strong { color:#FFD6E5!important; }
       .restock-dot { background:#FF75A2!important; box-shadow:0 0 12px #FF75A2!important; }
       .intake-flow { border:1px solid #927BFF70!important; border-radius:14px!important; background:linear-gradient(110deg,#211B3D,#111D2D)!important; box-shadow:0 13px 35px #07091475!important; }
       .intake-step.active .intake-icon { background:linear-gradient(140deg,#8A62FF,#2FD8BD)!important; color:#080B16!important; border:0!important; box-shadow:0 0 24px #61DCC699!important; }
@@ -342,4 +349,3 @@ def show_flash():
     notice = st.session_state.pop("_gioval_flash", None)
     if notice:
         st.toast(notice["message"], icon=notice.get("icon", "✅"))
-
