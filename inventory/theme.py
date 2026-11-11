@@ -209,6 +209,15 @@ def apply_brand():
       @media(prefers-reduced-motion:reduce) { .intake-step.active .intake-icon { animation:none!important; } }
       /* PRISM PASS: una identidad más visible, editorial y menos parecida al tema base */
       [data-testid="stDataFrame"] { width:100%!important; max-width:100%!important; min-width:0!important; }
+      .responsive-table-shell { width:100%; max-width:100%; min-width:0; overflow:hidden; border:1px solid #7A86C452; border-radius:15px; background:linear-gradient(145deg,#11172A,#0D1220); box-shadow:0 18px 42px #02040B70,inset 0 1px #FFFFFF0A; }
+      .responsive-inventory-table { width:100%; border-collapse:separate; border-spacing:0; table-layout:fixed; color:#E8EBF7; font-size:.86rem; }
+      .responsive-inventory-table th { padding:.9rem .85rem; border-bottom:1px solid #7784C24D; background:linear-gradient(100deg,#211C3C,#17243A); color:#BFC8E7; font-size:.68rem; font-weight:760; letter-spacing:.075em; text-align:left; text-transform:uppercase; }
+      .responsive-inventory-table th:first-child { width:25%; color:#9EF5E3; }
+      .responsive-inventory-table td { padding:.8rem .85rem; border-bottom:1px solid #FFFFFF10; color:#E5E8F2; overflow-wrap:anywhere; }
+      .responsive-inventory-table tbody tr:nth-child(even) { background:#FFFFFF04; }
+      .responsive-inventory-table tbody tr:hover { background:linear-gradient(90deg,#775AFF22,#40E6CA12); }
+      .responsive-inventory-table tbody tr:last-child td { border-bottom:0; }
+      .responsive-inventory-table td:first-child { color:#FFFFFF; font-weight:680; }
       :root { --prism-cyan:#55F2D1; --prism-lime:#D8FF62; --prism-lilac:#AA86FF; --prism-ink:#090B16; }
       .stApp { background:
         radial-gradient(ellipse at 4% 18%,#663EFF4A,transparent 31rem),
@@ -283,7 +292,19 @@ def apply_brand():
       @keyframes prism-breathe { 0%,100% { filter:brightness(1); } 50% { filter:brightness(1.13); } }
       .login-story { animation:prism-breathe 7s ease-in-out infinite; }
       @media(max-width:900px) { .stHorizontalBlock:has(.login-story) > [data-testid="stColumn"]:first-child { padding:.7rem; } .login-story { min-height:290px!important; padding:1.6rem!important; } .login-story h2 { font-size:2.25rem!important; } }
-      @media(max-width:640px) { .ops-hero { border-radius:15px!important; } .ops-hero h2 { font-size:2rem!important; } .ops-flow { flex-wrap:wrap; } .stHorizontalBlock:has(.login-story) > [data-testid="stColumn"]:last-child { padding:1.2rem!important; } .login-story::before { font-size:18rem; } }
+      @media(max-width:640px) {
+        .ops-hero { border-radius:15px!important; } .ops-hero h2 { font-size:2rem!important; } .ops-flow { flex-wrap:wrap; }
+        .stHorizontalBlock:has(.login-story) > [data-testid="stColumn"]:last-child { padding:1.2rem!important; } .login-story::before { font-size:18rem; }
+        .responsive-table-shell { overflow:visible; border:0; background:transparent; box-shadow:none; }
+        .responsive-inventory-table,.responsive-inventory-table tbody { display:block; width:100%; }
+        .responsive-inventory-table thead { display:none; }
+        .responsive-inventory-table tbody tr { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.1rem .55rem; margin:.55rem 0; padding:.55rem; border:1px solid #7A86C452; border-radius:13px; background:linear-gradient(140deg,#171B32,#101A29)!important; box-shadow:0 8px 22px #02040B55; }
+        .responsive-inventory-table tbody tr:hover { border-color:#55F2D188; }
+        .responsive-inventory-table td { display:flex; min-width:0; flex-direction:column; gap:.18rem; padding:.48rem; border:0; font-size:.82rem; }
+        .responsive-inventory-table td::before { content:attr(data-label); color:#91A0C4; font-size:.61rem; font-weight:760; letter-spacing:.06em; text-transform:uppercase; }
+        .responsive-inventory-table td:first-child { grid-column:1/-1; padding-bottom:.6rem; border-bottom:1px solid #FFFFFF18; color:#FFFFFF; font-size:.98rem; }
+        .responsive-inventory-table td:first-child::before { color:#55F2D1; }
+      }
       @media(prefers-reduced-motion:reduce) { .login-story { animation:none!important; } }
     </style>
     """, unsafe_allow_html=True)
