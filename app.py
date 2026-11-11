@@ -22,7 +22,8 @@ from inventory.theme import apply_brand, show_flash, brand_lockup
 from inventory.ui import dashboard, documents, movements, products, receipts, exports
 
 ROOT = Path(__file__).resolve().parent
-apply_brand()
+st.session_state.setdefault("easy_reading", True)
+apply_brand(easy_reading=st.session_state.get("easy_reading", True))
 if not render_login(ROOT):
     st.stop()
 show_flash()
@@ -31,15 +32,18 @@ render_security_sidebar(ROOT)
 
 with st.sidebar:
     brand_lockup("OPERACIONES")
+    st.checkbox("Vista sencilla · texto grande", key="easy_reading",
+                help="Aumenta el tamaño del texto y de los botones para facilitar la lectura y el uso.")
     st.divider()
     sections = ["Resumen", "Ingresar facturas", "Facturas", "Productos", "Movimientos", "Respaldo"]
-    icons = {"Resumen": "◈", "Ingresar facturas": "＋", "Facturas": "▤",
-             "Productos": "▦", "Movimientos": "↕", "Respaldo": "⇩"}
+    section_labels = {"Resumen": "Inicio", "Ingresar facturas": "Cargar facturas",
+                      "Facturas": "Historial de facturas", "Productos": "Inventario",
+                      "Movimientos": "Entradas y ajustes", "Respaldo": "Copias de seguridad"}
     page = st.radio("Secciones", sections,
-                    format_func=lambda section: f"{icons[section]}   {section}",
+                    format_func=lambda section: section_labels[section],
                     label_visibility="collapsed", key="app_navigation")
     st.divider()
-    st.caption("Solo las líneas clasificadas como mercadería ingresan al stock.")
+    st.caption("Solo los productos confirmados aumentan el inventario.")
 
 if page == "Resumen":
     dashboard(con)
@@ -55,4 +59,3 @@ else:
     movements(con)
 
 con.close()
-
