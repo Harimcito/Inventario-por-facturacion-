@@ -208,6 +208,7 @@ def apply_brand():
       .intake-step.active .intake-icon { animation:tech-glow 2.4s ease-in-out infinite; }
       @media(prefers-reduced-motion:reduce) { .intake-step.active .intake-icon { animation:none!important; } }
       /* PRISM PASS: una identidad más visible, editorial y menos parecida al tema base */
+      [data-testid="stDataFrame"] { width:100%!important; max-width:100%!important; min-width:0!important; }
       :root { --prism-cyan:#55F2D1; --prism-lime:#D8FF62; --prism-lilac:#AA86FF; --prism-ink:#090B16; }
       .stApp { background:
         radial-gradient(ellipse at 4% 18%,#663EFF4A,transparent 31rem),
