@@ -30,9 +30,13 @@ render_security_sidebar(ROOT)
 
 with st.sidebar:
     st.markdown("### 📦 Gioval")
-    st.caption("CONTROL DE INVENTARIO")
+    st.caption("INVENTARIO · OPERACIONES")
     st.divider()
-    page = st.radio("Secciones", ["Resumen", "Ingresar facturas", "Facturas", "Productos", "Movimientos", "Respaldo"],
+    sections = ["Resumen", "Ingresar facturas", "Facturas", "Productos", "Movimientos", "Respaldo"]
+    icons = {"Resumen": "◈", "Ingresar facturas": "＋", "Facturas": "▤",
+             "Productos": "▦", "Movimientos": "↕", "Respaldo": "⇩"}
+    page = st.radio("Secciones", sections,
+                    format_func=lambda section: f"{icons[section]}   {section}",
                     label_visibility="collapsed")
     st.divider()
     st.caption("Solo las líneas clasificadas como mercadería ingresan al stock.")
