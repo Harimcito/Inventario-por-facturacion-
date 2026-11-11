@@ -18,7 +18,7 @@ for module in (inventory_text, inventory_classifier, inventory_database,
 
 from inventory.database import connect
 from inventory.auth import render_login, render_security_sidebar
-from inventory.theme import apply_brand, show_flash
+from inventory.theme import apply_brand, show_flash, brand_lockup
 from inventory.ui import dashboard, documents, movements, products, receipts, exports
 
 ROOT = Path(__file__).resolve().parent
@@ -30,8 +30,7 @@ con = connect(ROOT / "inventario.db")
 render_security_sidebar(ROOT)
 
 with st.sidebar:
-    st.markdown("### 📦 Gioval")
-    st.caption("INVENTARIO · OPERACIONES")
+    brand_lockup("OPERACIONES")
     st.divider()
     sections = ["Resumen", "Ingresar facturas", "Facturas", "Productos", "Movimientos", "Respaldo"]
     icons = {"Resumen": "◈", "Ingresar facturas": "＋", "Facturas": "▤",
