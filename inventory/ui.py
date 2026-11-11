@@ -130,6 +130,7 @@ def _add_uploads(uploads, queue):
 
 def documents(con, docs_dir: Path):
     page_header("Ingresar facturas", "Revisa y clasifica cada línea antes de actualizar el inventario.")
+    queue = st.session_state.setdefault("queue", {})
     with st.expander("Conectar con el SII", expanded=False):
         st.markdown("**Importación oficial de facturas recibidas**")
         st.write("El SII permite generar un archivo de respaldo XML con DTE recibidos. Descárgalo en el portal y súbelo aquí: cada factura se separará para revisar sus productos.")
@@ -160,11 +161,25 @@ def documents(con, docs_dir: Path):
             flash_on_next_render(f"{len(queue)} documento(s) listo(s) para revisar", "📄")
         st.rerun()
 
-    queue = st.session_state.setdefault("queue", {})
+    pending = len(queue)
+    duplicate_pending = sum(find_duplicate(con, draft) is not None for draft in queue.values())
+    receipts_total = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL").fetchone()["n"]
+    inventory_count = con.execute("SELECT COUNT(*) AS n FROM products WHERE active=1 AND item_type='Mercadería'").fetchone()["n"]
+    s1_state = "done" if pending else "active"
+    s2_state = "active" if pending else "waiting"
+    s3_state = "done" if receipts_total else "waiting"
+    st.markdown(f'''<div class="intake-flow">
+      <div class="intake-step {s1_state}"><b>01</b><span class="intake-icon">↑</span><div><small>ETAPA 01</small><strong>Agregar archivos</strong><em>PDF · XML · imagen</em></div></div>
+      <span class="intake-connector"></span>
+      <div class="intake-step {s2_state}"><b>02</b><span class="intake-icon">⌕</span><div><small>ETAPA 02</small><strong>Revisar contenido</strong><em>{pending} pendiente(s)</em></div></div>
+      <span class="intake-connector"></span>
+      <div class="intake-step {s3_state}"><b>03</b><span class="intake-icon">▦</span><div><small>ETAPA 03</small><strong>Actualizar stock</strong><em>{inventory_count} productos activos</em></div></div>
+    </div>''', unsafe_allow_html=True)
     if not queue:
-        st.info("Tus facturas listas para revisar aparecerán aquí después de agregarlas arriba.")
+        st.markdown('<div class="intake-empty"><span class="empty-mark">01</span><div><strong>Todo comienza con el documento.</strong><p>Selecciona una o varias facturas arriba. Se separarán para que puedas revisar cada una antes de modificar el inventario.</p></div></div>', unsafe_allow_html=True)
         return
-    st.info(f"Hay **{len(queue)} documento(s)** en revisión. Cada uno se confirma por separado y solo entonces se actualiza el stock.")
+    message = f"{pending} documento(s) en la bandeja · {duplicate_pending} repetido(s) detectado(s)" if duplicate_pending else f"{pending} documento(s) en la bandeja · cada factura se confirma por separado"
+    st.markdown(f'<div class="intake-queue"><span class="queue-live"></span><strong>{message}</strong><small>El stock no cambia hasta confirmar la revisión.</small></div>', unsafe_allow_html=True)
     queue_names = list(queue)
     queue_position = {name: index + 1 for index, name in enumerate(queue_names)}
     selected = st.selectbox("Documento por revisar", queue_names,
