@@ -37,7 +37,7 @@ with st.sidebar:
              "Productos": "▦", "Movimientos": "↕", "Respaldo": "⇩"}
     page = st.radio("Secciones", sections,
                     format_func=lambda section: f"{icons[section]}   {section}",
-                    label_visibility="collapsed")
+                    label_visibility="collapsed", key="app_navigation")
     st.divider()
     st.caption("Solo las líneas clasificadas como mercadería ingresan al stock.")
 
