@@ -2,6 +2,7 @@
 import sqlite3
 from pathlib import Path
 
+from inventory.classifier import PRODUCT_CATEGORIES, suggest_product_category
 from inventory.text import clean_product_name, normalize_product_key, normalize_rut, normalize_supplier, parse_clp, parse_invoice_quantity
 
 
@@ -68,6 +69,19 @@ def connect(db_path: Path) -> sqlite3.Connection:
     con.execute("CREATE INDEX IF NOT EXISTS idx_receipts_duplicate ON receipts(duplicate_of)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_receipt_lines_receipt ON receipt_lines(receipt_id)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_adjustments_product ON inventory_adjustments(product_id)")
+    # Normaliza instalaciones anteriores y cualquier mercadería sin categoría;
+    # las elecciones manuales entre las dos categorías permitidas se conservan.
+    placeholders = ",".join("?" for _ in PRODUCT_CATEGORIES)
+    legacy = con.execute(
+        f"SELECT id,name FROM products WHERE item_type='Mercadería' AND "
+        f"(category IS NULL OR category NOT IN ({placeholders}))",
+        PRODUCT_CATEGORIES,
+    ).fetchall()
+    if legacy:
+        with con:
+            for product in legacy:
+                con.execute("UPDATE products SET category=? WHERE id=?",
+                            (suggest_product_category(product["name"]), product["id"]))
     return con
 
 
@@ -165,7 +179,8 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
                     if duplicate_of is None and normalize_product_key(name) != normalize_product_key(product["name"]):
                         save_product_alias(con, product_id, name)
                 elif duplicate_of is None:
-                    con.execute("INSERT OR IGNORE INTO products(name,stock,cost) VALUES(?,0,?)", (name, cost))
+                    con.execute("INSERT OR IGNORE INTO products(name,category,stock,cost) VALUES(?,?,0,?)",
+                                (name, suggest_product_category(name), cost))
                     product_id = con.execute("SELECT id FROM products WHERE name=?", (name,)).fetchone()["id"]
                 con.execute("""INSERT INTO receipt_lines
                     (receipt_id,line_number,original_description,product_id,quantity,unit_cost,line_total,line_type)
@@ -194,6 +209,8 @@ def update_product(con, product_id: int, name: str, category: str, new_stock: in
     name = clean_product_name(name)
     if not name:
         raise ValueError("El nombre del producto no puede quedar vacío.")
+    if category not in PRODUCT_CATEGORIES:
+        raise ValueError("Elige una de las dos categorías del inventario.")
     current = con.execute("SELECT stock FROM products WHERE id=?", (product_id,)).fetchone()
     if not current:
         raise ValueError("No se encontró el producto.")
