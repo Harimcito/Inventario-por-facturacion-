@@ -70,30 +70,30 @@ def dashboard(con):
     value_label = f"$ {inventory_value:,}".replace(",", ".")
     st.markdown(f'''<section class="ops-hero">
       <div class="ops-hero-copy"><div class="ops-kicker"><span>GIOVAL</span> / CONTROL DE INVENTARIO</div>
-        <h2>De factura a stock.<br><em>Todo en orden.</em></h2>
-        <p>Recepciona mercadería, revisa cada línea y conserva el historial de lo que entra.</p>
-        <div class="ops-flow"><div class="flow-step"><b>01</b><span>DOCUMENTOS</span><strong>{month_receipts}</strong></div><i></i><div class="flow-step{' is-active' if pending_docs else ''}"><b>02</b><span>REVISIÓN</span><strong>{pending_docs}</strong></div><i></i><div class="flow-step"><b>03</b><span>STOCK</span><strong>{unit_count}</strong></div></div>
+        <h2>Tu inventario,<br><em>paso a paso.</em></h2>
+        <p>Carga una factura, revisa los productos y confirma para actualizar las existencias.</p>
+        <div class="ops-flow"><div class="flow-step"><b>01</b><span>Facturas</span><strong>{month_receipts}</strong></div><i></i><div class="flow-step{' is-active' if pending_docs else ''}"><b>02</b><span>Por revisar</span><strong>{pending_docs}</strong></div><i></i><div class="flow-step"><b>03</b><span>Unidades</span><strong>{unit_count}</strong></div></div>
       </div>
-      <div class="ops-hero-data"><div class="ops-value-label">VALORIZADO AL COSTO</div>
+      <div class="ops-hero-data"><div class="ops-value-label">VALOR DE COMPRA DEL INVENTARIO</div>
         <div class="ops-value">{value_label}</div><div class="ops-value-note">{unit_count:,} unidades · {len(products)} productos</div>
-        <div class="ops-category-head">MAYOR STOCK POR CATEGORÍA</div>{category_bars or '<div class="ops-empty-category">Tus categorías aparecerán aquí.</div>'}
+        <div class="ops-category-head">UNIDADES POR CATEGORÍA</div>{category_bars or '<div class="ops-empty-category">Tus categorías aparecerán aquí.</div>'}
       </div>
     </section>''', unsafe_allow_html=True)
     quick_a, quick_b, note = st.columns([1.1, 1, 1.4], vertical_alignment="center")
-    if quick_a.button("＋  Ingresar facturas", type="primary", use_container_width=True,
+    if quick_a.button("Cargar facturas", type="primary", use_container_width=True,
                       on_click=_go_to_section, args=("Ingresar facturas",)):
         pass
-    if quick_b.button("▦  Abrir productos", use_container_width=True,
+    if quick_b.button("Ver inventario", use_container_width=True,
                       on_click=_go_to_section, args=("Productos",)):
         pass
     note.caption(f"{month_receipts} factura(s) este mes · {pending_docs} en revisión · {low_stock} alerta(s) de stock bajo")
 
     st.markdown('<div class="ops-sectionline"><span>VISTA GENERAL</span><i></i><small>POSICIÓN ACTUAL DEL INVENTARIO</small></div>', unsafe_allow_html=True)
     a, b, c, d = st.columns(4)
-    a.metric("Productos activos", len(products))
-    b.metric("Unidades en stock", unit_count)
-    c.metric("Valorizado al costo", value_label)
-    d.metric("Facturas registradas", receipts)
+    a.metric("Productos en inventario", len(products))
+    b.metric("Unidades disponibles", unit_count)
+    c.metric("Costo total del inventario", value_label)
+    d.metric("Facturas guardadas", receipts)
     if excluded:
         st.caption(f"{excluded} servicios, comisiones y ajustes se conservan en sus facturas, fuera del stock.")
     if duplicates:
@@ -119,7 +119,7 @@ def dashboard(con):
             pass
     else:
         st.markdown('<div class="ops-attention is-clear"><div><span class="attention-kicker">SEÑAL DE REPOSICIÓN</span><h3>Todo al día</h3><p>Ningún producto está bajo su mínimo.</p></div><span class="clear-mark">✓</span></div>', unsafe_allow_html=True)
-    st.subheader("Stock actual")
+    st.subheader("Productos en inventario")
     if products:
         s1, s2 = st.columns([2, 1])
         search = s1.text_input("Buscar producto", placeholder="Nombre, marca o variante", key="dashboard_product_search")
@@ -152,9 +152,9 @@ def _add_uploads(uploads, queue):
 
 
 def documents(con, docs_dir: Path):
-    page_header("Ingresar facturas", "Revisa y clasifica cada línea antes de actualizar el inventario.")
+    page_header("Cargar facturas y boletas", "Selecciona los documentos, revisa sus productos y guarda para actualizar el inventario.")
     queue = st.session_state.setdefault("queue", {})
-    with st.expander("Conectar con el SII", expanded=False):
+    with st.expander("Importar archivo de respaldo del SII", expanded=False):
         st.markdown("**Importación oficial de facturas recibidas**")
         st.write("El SII permite generar un archivo de respaldo XML con DTE recibidos. Descárgalo en el portal y súbelo aquí: cada factura se separará para revisar sus productos.")
         st.link_button("Abrir guía oficial del SII", "https://www.sii.cl/destacados/factura_electronica/guias_ayuda/como_generar_archivo_respaldo.htm")
@@ -162,7 +162,7 @@ def documents(con, docs_dir: Path):
         st.info("El SII no publica una API abierta para descargar automáticamente todas las facturas entrantes. La importación usa el respaldo XML oficial y evita automatizaciones frágiles del portal.")
 
     ai_key = openai_key() or st.session_state.get("openai_key", "")
-    with st.expander("Lectura con inteligencia artificial", expanded=False):
+    with st.expander("Lectura automática del documento", expanded=False):
         st.caption("La IA puede leer PDF e imágenes. El XML del SII se interpreta localmente sin consumir API.")
         typed_key = st.text_input("API key de OpenAI (opcional)", value="", type="password", placeholder="Se usa solo durante esta sesión")
         if typed_key:
@@ -173,10 +173,10 @@ def documents(con, docs_dir: Path):
         else:
             st.caption("Agrega aquí tu API key o configura OPENAI_API_KEY en el equipo.")
 
-    uploads = st.file_uploader("Archivos de proveedores o respaldo XML del SII",
+    uploads = st.file_uploader("Selecciona facturas, boletas o un archivo del SII",
         type=["pdf", "png", "jpg", "jpeg", "xml"], accept_multiple_files=True,
         help="Puedes seleccionar varias facturas; los respaldos XML se dividen por DTE.")
-    if uploads and st.button(f"Preparar {len(uploads)} archivo(s)", type="primary"):
+    if uploads and st.button(f"Revisar documentos ({len(uploads)})", type="primary"):
         queue = st.session_state.setdefault("queue", {})
         for error in _add_uploads(uploads, queue):
             st.error(error)
@@ -205,7 +205,7 @@ def documents(con, docs_dir: Path):
     st.markdown(f'<div class="intake-queue"><span class="queue-live"></span><strong>{message}</strong><small>El stock no cambia hasta confirmar la revisión.</small></div>', unsafe_allow_html=True)
     queue_names = list(queue)
     queue_position = {name: index + 1 for index, name in enumerate(queue_names)}
-    selected = st.selectbox("Documento por revisar", queue_names,
+    selected = st.selectbox("Factura que estás revisando", queue_names,
         format_func=lambda name: f"{queue_position[name]} de {len(queue_names)} · {name}")
     item = queue[selected]
     original, review = st.columns([.85, 1.35], gap="large")
@@ -226,9 +226,11 @@ def documents(con, docs_dir: Path):
             st.success("Datos del DTE extraídos desde XML en este equipo.")
             st.caption(f"RUT: {item.get('rut') or '—'} · Tipo DTE: {item.get('kind') or '—'} · Total declarado: $ {item.get('total') or '—'}")
         else:
-            engine = st.radio("Método de lectura", ["OpenAI", "OCR local"], horizontal=True,
-                              index=0 if ai_key else 1, key=f"engine_{selected}")
-            if st.button("Leer documento", key=f"read_{selected}", disabled=engine == "OpenAI" and not ai_key):
+            engine = st.radio("Cómo leer el documento", ["OpenAI", "OCR local"], horizontal=True,
+                              format_func=lambda value: {"OpenAI": "IA de OpenAI", "OCR local": "Lectura en este equipo"}[value],
+                              index=0 if ai_key else 1, key=f"engine_{selected}",
+                              help="La lectura en este equipo no envía el documento a internet.")
+            if st.button("Leer datos de esta factura", key=f"read_{selected}", disabled=engine == "OpenAI" and not ai_key):
                 try:
                     if engine == "OpenAI":
                         data = ai_extract(item["bytes"], item["source_name"], ai_key)
@@ -259,7 +261,7 @@ def documents(con, docs_dir: Path):
                     st.text(item["raw"])
 
     with review:
-        st.subheader("Revisión editable")
+        st.subheader("Revisa los datos")
         supplier = st.text_input("Proveedor", item["supplier"], key=f"supplier_{selected}")
         number = st.text_input("Folio", item["number"], key=f"number_{selected}")
         doc_date = st.date_input("Fecha de emisión", value=item["date"], key=f"date_{selected}")
@@ -311,7 +313,7 @@ def documents(con, docs_dir: Path):
                         if exact is None:
                             exact = next((a["product_id"] for a in alias_rows if a["alias_key"] == normalized_name), None)
                         default_id = exact
-                    mapping = st.selectbox("Asociar al producto del inventario", options,
+                    mapping = st.selectbox("¿A qué producto del inventario corresponde?", options,
                         index=options.index(default_id) if default_id in options else 0,
                         format_func=lambda pid: "Crear producto nuevo" if pid is None else next(
                             f"{p['name']} · {p['category']}" if p["category"] else p["name"]
@@ -386,7 +388,7 @@ def documents(con, docs_dir: Path):
 
 
 def products(con):
-    page_header("Productos", "Administra el catálogo, stock, costo promedio y margen sugerido.")
+    page_header("Inventario", "Busca productos y revisa o cambia las cantidades, costos y precios.")
     with st.expander("＋ Agregar producto"):
         with st.form("new_product"):
             name = st.text_input("Nombre del producto")
@@ -471,7 +473,9 @@ def products(con):
     catalog_search = f_search.text_input("Buscar producto", placeholder="Nombre, descripción o marca", key="products_catalog_search")
     categories = sorted({p["category"] for p in rows if p["category"]})
     catalog_category = f_category.selectbox("Categoría", ["Todas"] + categories, key="products_catalog_category")
-    stock_filter = f_stock.selectbox("Disponibilidad", ["Todas", "Requiere reposición", "Sobre el mínimo"], key="products_stock_filter")
+    stock_filter = f_stock.selectbox("Disponibilidad", ["Todas", "Requiere reposición", "Sobre el mínimo"],
+        format_func=lambda value: {"Todas": "Todos", "Requiere reposición": "Necesita reposición", "Sobre el mínimo": "Stock suficiente"}[value],
+        key="products_stock_filter")
     if catalog_search:
         query = catalog_search.casefold()
         rows = [p for p in rows if query in (p["name"] + " " + (p["description"] or "") + " " + (p["category"] or "")).casefold()]
@@ -515,7 +519,7 @@ def products(con):
         "Costo unitario": f"$ {p['cost']:,}".replace(",", "."),
         "Precio sugerido": f"$ {round(p['cost'] * (1 + p['margin'] / 100)):,}".replace(",", ".")}
         for p in rows], "Catálogo de productos")
-    with st.expander("Editar producto"):
+    with st.expander("Editar los datos de un producto"):
         products_by_id = {int(p["id"]): p for p in rows}
         selected_product_id = st.selectbox("Producto", list(products_by_id),
             format_func=lambda product_id: display_product_name(products_by_id[product_id]["name"]))
@@ -553,7 +557,7 @@ def products(con):
 
 
 def movements(con):
-    page_header("Movimientos", "Historial de compras confirmadas y cambios de stock.")
+    page_header("Entradas y ajustes", "Revisa las facturas que ingresaron productos y los cambios manuales de stock.")
     rows = con.execute("""SELECT m.created_at,p.name,r.supplier,r.invoice_no,r.filename,m.quantity,m.unit_cost
         FROM movements m JOIN products p ON p.id=m.product_id JOIN receipts r ON r.id=m.receipt_id
         WHERE p.item_type='Mercadería' ORDER BY m.id DESC""").fetchall()
@@ -577,7 +581,7 @@ def movements(con):
 
 
 def receipts(con, docs_dir: Path):
-    page_header("Facturas", "Consulta documentos guardados, líneas reconocidas y facturas repetidas.")
+    page_header("Historial de facturas", "Busca documentos guardados y revisa los productos de cada factura.")
     suppliers = [r[0] for r in con.execute("SELECT DISTINCT supplier FROM receipts ORDER BY supplier")]
     c1, c2 = st.columns([1, 2])
     supplier = c1.selectbox("Proveedor", ["Todos"] + suppliers)
@@ -615,7 +619,7 @@ def receipts(con, docs_dir: Path):
 def exports(con, root: Path):
     import csv, io, zipfile
     from datetime import datetime
-    page_header("Respaldo y exportación", "Descarga una copia del inventario y de sus documentos originales.")
+    page_header("Copias de seguridad", "Descarga una copia para guardar tus productos y documentos.")
     products = con.execute("""SELECT p.name,p.description,p.category,p.stock,p.min_stock,p.cost,p.margin,
         ROUND(p.cost*(1+p.margin/100)) AS suggested,
         (SELECT group_concat(alias, '; ') FROM product_aliases a WHERE a.product_id=p.id) AS aliases
