@@ -1,6 +1,7 @@
 """Vistas Streamlit; las reglas de negocio permanecen en servicios separados."""
 import uuid
 import sqlite3
+import html
 from difflib import SequenceMatcher
 from pathlib import Path
 from datetime import date
@@ -13,23 +14,62 @@ from inventory.text import clean_product_name, normalize_product_key, display_pr
 from inventory.classifier import classify_line, suggest_product_category, LINE_TYPES, MERCHANDISE
 
 
+def _go_to_section(section: str):
+    st.session_state["app_navigation"] = section
+
+
 def dashboard(con):
     products = con.execute("SELECT * FROM products WHERE active=1 AND item_type='Mercadería' ORDER BY name").fetchall()
     receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL").fetchone()["n"]
     duplicates = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NOT NULL").fetchone()["n"]
     excluded = con.execute("SELECT COUNT(*) AS n FROM products WHERE active=1 AND item_type<>'Mercadería'").fetchone()["n"]
-    page_header("Inventario de mercadería", "Compras recibidas, unidades disponibles y precios sugeridos.")
     inventory_value = sum(int(p["stock"]) * int(p["cost"]) for p in products)
+    unit_count = sum(int(p["stock"]) for p in products)
+    low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
+    month_key = date.today().strftime("%Y-%m")
+    month_receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL AND substr(doc_date,1,7)=?", (month_key,)).fetchone()["n"]
+    pending_docs = len(st.session_state.get("queue", {}))
+    category_totals = {}
+    for product in products:
+        category = product["category"] or "Sin categoría"
+        category_totals[category] = category_totals.get(category, 0) + int(product["stock"])
+    largest_category = max(category_totals.values(), default=0)
+    category_bars = "".join(
+        f'<div class="ops-category"><span>{html.escape(category)}</span><span>{units} u.</span>'
+        f'<div class="ops-bar"><i style="width:{round(units / largest_category * 100) if largest_category else 0}%"></i></div></div>'
+        for category, units in sorted(category_totals.items(), key=lambda item: (-item[1], item[0]))[:3]
+    )
+    value_label = f"$ {inventory_value:,}".replace(",", ".")
+    st.markdown(f'''<section class="ops-hero">
+      <div class="ops-hero-copy"><div class="ops-kicker"><span>GIOVAL</span> / CONTROL DE INVENTARIO</div>
+        <h2>De factura a stock.<br><em>Todo en orden.</em></h2>
+        <p>Recepciona mercadería, revisa cada línea y conserva el historial de lo que entra.</p>
+        <div class="ops-flow"><div><b>01</b><span>DOCUMENTO</span></div><i></i><div><b>02</b><span>REVISIÓN</span></div><i></i><div><b>03</b><span>INVENTARIO</span></div></div>
+      </div>
+      <div class="ops-hero-data"><div class="ops-value-label">VALORIZADO AL COSTO</div>
+        <div class="ops-value">{value_label}</div><div class="ops-value-note">{unit_count:,} unidades · {len(products)} productos</div>
+        <div class="ops-category-head">MAYOR STOCK POR CATEGORÍA</div>{category_bars or '<div class="ops-empty-category">Tus categorías aparecerán aquí.</div>'}
+      </div>
+    </section>''', unsafe_allow_html=True)
+    quick_a, quick_b, note = st.columns([1.1, 1, 1.4], vertical_alignment="center")
+    if quick_a.button("＋  Ingresar facturas", type="primary", use_container_width=True,
+                      on_click=_go_to_section, args=("Ingresar facturas",)):
+        pass
+    if quick_b.button("▦  Abrir productos", use_container_width=True,
+                      on_click=_go_to_section, args=("Productos",)):
+        pass
+    note.caption(f"{month_receipts} factura(s) este mes · {pending_docs} en revisión · {low_stock} alerta(s) de stock bajo")
+
+    page_header("Resumen del inventario", "Una vista rápida de las unidades, compras y reposiciones pendientes.")
     a, b, c, d = st.columns(4)
     a.metric("Productos activos", len(products))
-    b.metric("Unidades en stock", sum(p["stock"] for p in products))
-    c.metric("Valorizado al costo", f"$ {inventory_value:,}".replace(",", "."))
+    b.metric("Unidades en stock", unit_count)
+    c.metric("Valorizado al costo", value_label)
     d.metric("Facturas registradas", receipts)
     if excluded:
         st.caption(f"{excluded} servicios, comisiones y ajustes se conservan en sus facturas, fuera del stock.")
     if duplicates:
         st.caption(f"{duplicates} documento(s) repetido(s) archivado(s), sin alterar el inventario.")
-    low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
     if low_stock:
         st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
         low_rows = sorted((p for p in products if p["stock"] <= p["min_stock"]),
