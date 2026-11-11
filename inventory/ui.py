@@ -23,6 +23,26 @@ def _go_to_restock():
     st.session_state["app_navigation"] = "Productos"
 
 
+def _responsive_table(rows, label: str):
+    """Tabla fluida en escritorio y tarjetas legibles en pantallas angostas."""
+    if not rows:
+        return
+    columns = list(rows[0].keys())
+    header = "".join(f"<th scope=\"col\">{html.escape(str(name))}</th>" for name in columns)
+    body = []
+    for row in rows:
+        cells = "".join(
+            f'<td data-label="{html.escape(str(name), quote=True)}">{html.escape(str(row.get(name, "—")))}</td>'
+            for name in columns
+        )
+        body.append(f"<tr>{cells}</tr>")
+    st.markdown(
+        f'<div class="responsive-table-shell"><table class="responsive-inventory-table" aria-label="{html.escape(label, quote=True)}">'
+        f"<thead><tr>{header}</tr></thead><tbody>{''.join(body)}</tbody></table></div>",
+        unsafe_allow_html=True,
+    )
+
+
 def dashboard(con):
     products = con.execute("SELECT * FROM products WHERE active=1 AND item_type='Mercadería' ORDER BY name").fetchall()
     receipts = con.execute("SELECT COUNT(*) AS n FROM receipts WHERE duplicate_of IS NULL").fetchone()["n"]
@@ -101,17 +121,10 @@ def dashboard(con):
         visible = [p for p in products if (not search or search.casefold() in (p["name"] + " " + (p["description"] or "")).casefold())
                    and (category == "Todas" or p["category"] == category)]
         st.caption(f"Mostrando {len(visible)} de {len(products)} productos inventariables")
-        st.dataframe([{"Producto": display_product_name(p["name"]), "Categoría": p["category"] or "—", "Unidades": p["stock"],
+        _responsive_table([{"Producto": display_product_name(p["name"]), "Categoría": p["category"] or "—", "Unidades": p["stock"],
             "Costo unitario": f"$ {p['cost']:,}".replace(",", "."), "Margen": f"{p['margin']:g}%",
             "Precio sugerido": f"$ {round(p['cost']*(1+p['margin']/100)):,}".replace(",", ".")}
-            for p in visible], column_config={
-                "Producto": st.column_config.TextColumn(width=250, pinned="left"),
-                "Categoría": st.column_config.TextColumn(width=135),
-                "Unidades": st.column_config.NumberColumn(format="%d"),
-                "Costo unitario": st.column_config.TextColumn(width=125),
-                "Margen": st.column_config.TextColumn(width=85),
-                "Precio sugerido": st.column_config.TextColumn(width=130),
-            }, width="stretch", hide_index=True, height="auto", row_height=42)
+            for p in visible], "Stock actual")
     else:
         st.info("Tu catálogo aparecerá aquí cuando confirmes una factura o agregues un producto.")
 
@@ -434,10 +447,12 @@ def products(con):
         with st.expander(f"Conceptos excluidos del inventario ({len(noninventory)})", expanded=False):
             st.dataframe([{"Descripción": display_product_name(p["name"]), "Clasificación": p["item_type"]}
                           for p in noninventory], width="stretch", height="auto", row_height=42, hide_index=True)
-            selected_noninventory = st.selectbox("Reincorporar como mercadería", noninventory,
-                format_func=lambda p: display_product_name(p["name"]), key="reinclude_noninventory")
+            noninventory_by_id = {int(product["id"]): product for product in noninventory}
+            selected_noninventory_id = st.selectbox("Reincorporar como mercadería", list(noninventory_by_id),
+                format_func=lambda product_id: display_product_name(noninventory_by_id[product_id]["name"]),
+                key="reinclude_noninventory")
             if st.button("Reincorporar al inventario", key="reinclude_inventory_item"):
-                set_product_classification(con, selected_noninventory["id"], MERCHANDISE)
+                set_product_classification(con, selected_noninventory_id, MERCHANDISE)
                 flash_on_next_render("Producto reincorporado al inventario", "📦")
                 st.rerun()
     rows = [p for p in all_active if p["item_type"] == MERCHANDISE]
@@ -486,23 +501,17 @@ def products(con):
                         con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
                 flash_on_next_render(f"{len(safe_changes)} descripción(es) normalizadas; el stock no cambió", "✍️")
                 st.rerun()
-    st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción / variante": p["description"] or "—",
+    _responsive_table([{"Producto": display_product_name(p["name"]), "Descripción / variante": p["description"] or "—",
         "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
         "Margen": f"{p['margin']:g}%",
         "Costo unitario": f"$ {p['cost']:,}".replace(",", "."),
         "Precio sugerido": f"$ {round(p['cost'] * (1 + p['margin'] / 100)):,}".replace(",", ".")}
-        for p in rows], column_config={
-            "Producto": st.column_config.TextColumn(width=230, pinned="left"),
-            "Descripción / variante": st.column_config.TextColumn(width=180),
-            "Categoría": st.column_config.TextColumn(width=125),
-            "Unidades": st.column_config.NumberColumn(format="%d"),
-            "Mínimo": st.column_config.NumberColumn(format="%d"),
-            "Margen": st.column_config.TextColumn(width=82),
-            "Costo unitario": st.column_config.TextColumn(width=120),
-            "Precio sugerido": st.column_config.TextColumn(width=125),
-        }, width="stretch", hide_index=True, height="auto", row_height=44)
+        for p in rows], "Catálogo de productos")
     with st.expander("Editar producto"):
-        product = st.selectbox("Producto", rows, format_func=lambda p: display_product_name(p["name"]))
+        products_by_id = {int(p["id"]): p for p in rows}
+        selected_product_id = st.selectbox("Producto", list(products_by_id),
+            format_func=lambda product_id: display_product_name(products_by_id[product_id]["name"]))
+        product = products_by_id[selected_product_id]
         with st.form(f"edit_{product['id']}"):
             name = st.text_input("Nombre del producto", product["name"])
             category = st.text_input("Categoría", product["category"] or "")
@@ -574,8 +583,10 @@ def receipts(con, docs_dir: Path):
     st.dataframe([{"Fecha": r["doc_date"], "Proveedor": r["supplier"], "Folio": r["invoice_no"],
         "Estado": "Repetida · no suma stock" if r["duplicate_of"] else "Ingresada",
         "Total": r["total_amount"], "Archivo": r["filename"]} for r in rows], width="stretch", height="auto", row_height=42, hide_index=True)
-    choice = st.selectbox("Ver detalle de factura", rows,
-        format_func=lambda r: f"{r['doc_date']} · {r['supplier']} · Folio {r['invoice_no']}" + (" · REPETIDA" if r["duplicate_of"] else ""))
+    receipts_by_id = {int(r["id"]): r for r in rows}
+    selected_receipt_id = st.selectbox("Ver detalle de factura", list(receipts_by_id),
+        format_func=lambda receipt_id: f"{receipts_by_id[receipt_id]['doc_date']} · {receipts_by_id[receipt_id]['supplier']} · Folio {receipts_by_id[receipt_id]['invoice_no']}" + (" · REPETIDA" if receipts_by_id[receipt_id]["duplicate_of"] else ""))
+    choice = receipts_by_id[selected_receipt_id]
     lines = con.execute("""SELECT l.line_number,l.original_description,l.line_type,p.name AS producto,l.quantity,l.unit_cost,l.line_total
         FROM receipt_lines l LEFT JOIN products p ON p.id=l.product_id WHERE l.receipt_id=? ORDER BY l.line_number""", (choice["id"],)).fetchall()
     if lines:
