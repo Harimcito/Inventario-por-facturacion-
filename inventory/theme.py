@@ -4,7 +4,7 @@ import base64
 from pathlib import Path
 
 
-def apply_brand():
+def apply_brand(easy_reading: bool = False):
     st.set_page_config(
         page_title="Gioval · Inventario", page_icon=":material/inventory_2:",
         layout="wide", initial_sidebar_state="expanded",
@@ -315,6 +315,53 @@ def apply_brand():
       @media(prefers-reduced-motion:reduce) { .login-story { animation:none!important; } }
     </style>
     """, unsafe_allow_html=True)
+    if easy_reading:
+        st.markdown("""
+        <style>
+          /* Vista sencilla: lectura clara, controles amplios y menos movimiento. */
+          html, body, .stApp { font-size:18px!important; }
+          .block-container { max-width:1320px!important; padding-top:2.7rem!important; }
+          [data-testid="stMarkdownContainer"] p,
+          [data-testid="stCaptionContainer"],
+          [data-testid="stWidgetLabel"],
+          [data-testid="stMetricLabel"] { font-size:1rem!important; line-height:1.55!important; }
+          [data-testid="stCaptionContainer"] { color:#C7CBD7!important; }
+          .stApp h1 { font-size:clamp(2rem,3.5vw,2.65rem)!important; line-height:1.2!important; }
+          .stApp h2 { font-size:1.65rem!important; line-height:1.3!important; }
+          .stApp h3 { font-size:1.3rem!important; line-height:1.35!important; }
+          [data-testid="stSidebar"] [role="radiogroup"] label { min-height:52px!important; padding:.65rem .75rem!important; font-size:1.02rem!important; line-height:1.3!important; }
+          [data-testid="stSidebar"] [role="radiogroup"] label p { font-size:1.02rem!important; }
+          [data-testid="stCheckbox"] label, [data-testid="stRadio"] label { min-height:42px!important; font-size:1rem!important; }
+          .stButton button, .stDownloadButton button, [data-testid="stFormSubmitButton"] button,
+          [data-testid="stLinkButton"] a { min-height:52px!important; padding:.65rem 1rem!important; font-size:1.02rem!important; line-height:1.3!important; }
+          [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
+          [data-testid="stDateInput"] input, [data-baseweb="select"] > div { min-height:52px!important; font-size:1.02rem!important; }
+          [data-testid="stNumberInput"] button { min-width:44px!important; min-height:44px!important; }
+          [data-testid="stExpander"] summary { min-height:52px!important; font-size:1.02rem!important; }
+          [data-testid="stMetric"] { min-height:124px!important; padding:1.2rem!important; }
+          [data-testid="stMetricValue"] { font-size:clamp(1.7rem,3vw,2.25rem)!important; }
+          .responsive-inventory-table { font-size:.98rem!important; }
+          .responsive-inventory-table th { font-size:.78rem!important; }
+          .responsive-inventory-table td { padding:.95rem .85rem!important; line-height:1.45!important; }
+          .ops-kicker, .ops-flow span, .ops-value-label, .ops-category-head { font-size:.82rem!important; line-height:1.35!important; letter-spacing:.045em!important; }
+          .ops-hero-copy::after { display:none!important; }
+          .ops-flow { display:grid!important; grid-template-columns:repeat(3,minmax(0,1fr))!important; align-items:stretch!important; gap:.5rem!important; }
+          .ops-flow > i { display:none!important; }
+          .ops-flow .flow-step { display:grid!important; grid-template-columns:1fr!important; gap:.25rem!important; min-width:0!important; padding:.7rem!important; border:1px solid #FFFFFF28!important; border-radius:10px!important; background:#080B1760!important; white-space:normal!important; font-size:.9rem!important; letter-spacing:0!important; }
+          .ops-flow .flow-step span { overflow-wrap:anywhere!important; }
+          .restock-name, .restock-current, .restock-count, .attention-foot { font-size:.9rem!important; }
+          .restock-count small { font-size:.82rem!important; }
+          .intake-step small, .intake-step em { font-size:.82rem!important; }
+          .stApp *, .stApp *::before, .stApp *::after { animation-duration:.01ms!important; animation-iteration-count:1!important; scroll-behavior:auto!important; }
+          .stButton button:hover, .stDownloadButton button:hover { transform:none!important; }
+          @media(max-width:640px) {
+            .block-container { padding:2rem .85rem 2rem!important; }
+            .responsive-inventory-table td { font-size:.98rem!important; }
+            .responsive-inventory-table td::before { font-size:.76rem!important; }
+            .stHorizontalBlock { gap:.6rem!important; }
+          }
+        </style>
+        """, unsafe_allow_html=True)
 
 
 def page_header(title: str, description: str):
