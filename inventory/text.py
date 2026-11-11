@@ -129,6 +129,38 @@ def normalize_product_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", text)
 
 
+def parse_invoice_quantity(value) -> float:
+    """Convierte cantidades de OCR con formatos habituales chilenos sin truncar fracciones."""
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = re.sub(r"[^0-9,.-]", "", str(value or "").strip())
+    if not text:
+        return 0.0
+    if "," in text:
+        # Punto como miles y coma decimal cuando hay 1 o 2 decimales.
+        if text.count(",") == 1 and len(text.rsplit(",", 1)[1]) in (1, 2):
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            text = text.replace(",", "")
+    elif text.count(".") > 1 or ("." in text and len(text.rsplit(".", 1)[1]) == 3):
+        text = text.replace(".", "")
+    try:
+        return float(text)
+    except ValueError:
+        return 0.0
+
+
+def parse_clp(value) -> int:
+    """Lee montos CLP como enteros, interpretando puntos y comas como separadores."""
+    if isinstance(value, (int, float)):
+        return int(round(value))
+    text = re.sub(r"[^0-9-]", "", str(value or "").strip())
+    try:
+        return int(text or 0)
+    except ValueError:
+        return 0
+
+
 def normalize_supplier(value: str) -> str:
     value = unicodedata.normalize("NFKD", str(value or "")).casefold()
     value = "".join(char for char in value if not unicodedata.combining(char))
