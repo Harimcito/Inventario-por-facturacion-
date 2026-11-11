@@ -32,6 +32,17 @@ def dashboard(con):
     low_stock = sum(p["stock"] <= p["min_stock"] for p in products)
     if low_stock:
         st.warning(f"{low_stock} producto(s) están en su mínimo de stock o por debajo.")
+        low_rows = sorted((p for p in products if p["stock"] <= p["min_stock"]),
+                          key=lambda p: (p["stock"] - p["min_stock"], p["name"]))
+        with st.expander("Ver productos que necesitan reposición", expanded=False):
+            st.dataframe([{"Producto": display_product_name(p["name"]), "Categoría": p["category"] or "—",
+                "Disponible": p["stock"], "Mínimo definido": p["min_stock"],
+                "Faltan para el mínimo": max(0, p["min_stock"] - p["stock"])} for p in low_rows],
+                column_config={"Producto": st.column_config.TextColumn(width="large"),
+                    "Disponible": st.column_config.NumberColumn(format="%d"),
+                    "Mínimo definido": st.column_config.NumberColumn(format="%d"),
+                    "Faltan para el mínimo": st.column_config.NumberColumn(format="%d")},
+                use_container_width=True, hide_index=True, height=min(360, 38 + 35 * len(low_rows)))
     st.subheader("Stock actual")
     if products:
         s1, s2 = st.columns([2, 1])
@@ -41,10 +52,14 @@ def dashboard(con):
         visible = [p for p in products if (not search or search.casefold() in (p["name"] + " " + (p["description"] or "")).casefold())
                    and (category == "Todas" or p["category"] == category)]
         st.caption(f"Mostrando {len(visible)} de {len(products)} productos inventariables")
-        st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Stock mínimo": p["min_stock"],
+        st.dataframe([{"Producto": display_product_name(p["name"]), "Categoría": p["category"] or "—", "Unidades": p["stock"],
             "Costo unitario": f"$ {p['cost']:,}".replace(",", "."), "Margen": f"{p['margin']:g}%",
             "Precio sugerido": f"$ {round(p['cost']*(1+p['margin']/100)):,}".replace(",", ".")}
-            for p in visible], use_container_width=True, hide_index=True)
+            for p in visible], column_config={
+                "Producto": st.column_config.TextColumn(width="large"),
+                "Categoría": st.column_config.TextColumn(width="medium"),
+                "Unidades": st.column_config.NumberColumn(format="%d"),
+            }, use_container_width=True, hide_index=True, height=min(560, 38 + 35 * max(1, len(visible))))
     else:
         st.info("Tu catálogo aparecerá aquí cuando confirmes una factura o agregues un producto.")
 
@@ -96,9 +111,13 @@ def documents(con, docs_dir: Path):
 
     queue = st.session_state.setdefault("queue", {})
     if not queue:
-        st.info("Tus archivos aparecerán aquí listos para revisar.")
+        st.info("Tus facturas listas para revisar aparecerán aquí después de agregarlas arriba.")
         return
-    selected = st.selectbox("Documento por revisar", list(queue), format_func=lambda name: f"Pendiente · {name}")
+    st.info(f"Hay **{len(queue)} documento(s)** en revisión. Cada uno se confirma por separado y solo entonces se actualiza el stock.")
+    queue_names = list(queue)
+    queue_position = {name: index + 1 for index, name in enumerate(queue_names)}
+    selected = st.selectbox("Documento por revisar", queue_names,
+        format_func=lambda name: f"{queue_position[name]} de {len(queue_names)} · {name}")
     item = queue[selected]
     original, review = st.columns([.85, 1.35], gap="large")
     with original:
@@ -284,8 +303,9 @@ def products(con):
             a, b, c = st.columns(3)
             stock = a.number_input("Stock inicial (unidades)", 0, 100000, 0)
             cost = b.number_input("Costo unitario", 0, 100000000, 0)
-            margin = c.number_input("Margen sobre costo (%)", 0., 10000., 30.)
+            margin = c.number_input("Margen sobre costo (%)", 0., 10000., 30., help="El precio se calcula como costo × (1 + margen/100).")
             min_stock = st.number_input("Avisarme al llegar a (unidades)", 0, 100000, 3)
+            st.caption(f"Precio sugerido con estos valores: $ {round(cost * (1 + margin / 100)):,}".replace(",", "."))
             if st.form_submit_button("Guardar producto", type="primary"):
                 name = clean_product_name(name)
                 if not name:
@@ -349,10 +369,20 @@ def products(con):
     if not rows:
         st.info("Todavía no hay mercadería en el catálogo. Puedes agregar productos o reincorporar uno excluido.")
         return
-    catalog_search = st.text_input("Buscar en el catálogo", placeholder="Producto, descripción o marca", key="products_catalog_search")
+    f_search, f_category, f_stock = st.columns([1.5, 1, 1])
+    catalog_search = f_search.text_input("Buscar producto", placeholder="Nombre, descripción o marca", key="products_catalog_search")
+    categories = sorted({p["category"] for p in rows if p["category"]})
+    catalog_category = f_category.selectbox("Categoría", ["Todas"] + categories, key="products_catalog_category")
+    stock_filter = f_stock.selectbox("Disponibilidad", ["Todas", "Requiere reposición", "Sobre el mínimo"], key="products_stock_filter")
     if catalog_search:
         query = catalog_search.casefold()
         rows = [p for p in rows if query in (p["name"] + " " + (p["description"] or "") + " " + (p["category"] or "")).casefold()]
+    if catalog_category != "Todas":
+        rows = [p for p in rows if p["category"] == catalog_category]
+    if stock_filter == "Requiere reposición":
+        rows = [p for p in rows if p["stock"] <= p["min_stock"]]
+    elif stock_filter == "Sobre el mínimo":
+        rows = [p for p in rows if p["stock"] > p["min_stock"]]
     st.caption(f"{len(rows)} producto(s) en la vista")
     if not rows:
         st.info("No encontré productos con ese texto.")
@@ -381,9 +411,18 @@ def products(con):
                         con.execute("UPDATE products SET name=? WHERE id=?", (new, pid))
                 st.success("Descripciones corregidas sin cambiar stock ni movimientos.")
                 st.rerun()
-    st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción": p["description"] or "—", "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
-        "Costo": p["cost"], "Margen %": p["margin"], "Precio sugerido": round(p["cost"] * (1 + p["margin"] / 100))}
-        for p in rows], use_container_width=True, hide_index=True)
+    st.dataframe([{"Producto": display_product_name(p["name"]), "Descripción / variante": p["description"] or "—",
+        "Categoría": p["category"] or "—", "Unidades": p["stock"], "Mínimo": p["min_stock"],
+        "Margen": f"{p['margin']:g}%",
+        "Costo unitario": f"$ {p['cost']:,}".replace(",", "."),
+        "Precio sugerido": f"$ {round(p['cost'] * (1 + p['margin'] / 100)):,}".replace(",", ".")}
+        for p in rows], column_config={
+            "Producto": st.column_config.TextColumn(width="large"),
+            "Descripción / variante": st.column_config.TextColumn(width="medium"),
+            "Categoría": st.column_config.TextColumn(width="medium"),
+            "Unidades": st.column_config.NumberColumn(format="%d"),
+            "Mínimo": st.column_config.NumberColumn(format="%d"),
+        }, use_container_width=True, hide_index=True, height=min(600, 38 + 35 * len(rows)))
     with st.expander("Editar producto"):
         product = st.selectbox("Producto", rows, format_func=lambda p: display_product_name(p["name"]))
         with st.form(f"edit_{product['id']}"):
@@ -396,8 +435,10 @@ def products(con):
             a, b, c = st.columns(3)
             stock = a.number_input("Stock (unidades)", 0, 100000, product["stock"])
             cost = b.number_input("Costo", 0, 100000000, product["cost"])
-            margin = c.number_input("Margen %", 0., 10000., float(product["margin"]))
+            margin = c.number_input("Margen sobre costo (%)", 0., 10000., float(product["margin"]),
+                help="El precio sugerido se calcula como costo × (1 + margen/100).")
             min_stock = st.number_input("Avisarme al llegar a (unidades)", 0, 100000, int(product["min_stock"]))
+            st.caption(f"Precio sugerido actual: $ {round(cost * (1 + margin / 100)):,}".replace(",", "."))
             reason = st.text_input("Motivo del ajuste de stock", placeholder="Recuento, merma, consumo…")
             if st.form_submit_button("Guardar cambios", type="primary"):
                 name = clean_product_name(name)
