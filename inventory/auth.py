@@ -104,17 +104,27 @@ def render_login(root: Path) -> bool:
     st.session_state.pop("_inventory_auth_version", None)
     st.session_state.pop("_inventory_last_activity", None)
 
-    brand_lockup()
-    st.markdown("### Iniciar sesión")
-    st.write("Ingresa tus credenciales para abrir el inventario.")
     locked_for = max(0, int(account.get("locked_until", 0) - now))
+    intro, login = st.columns([1.1, 1], gap="large", vertical_alignment="center")
+    with intro:
+        brand_lockup("INVENTARIO")
+        st.markdown('''<div class="login-story">
+          <div class="login-kicker"><span></span> GIOVAL · OPERACIONES</div>
+          <h2>Todo lo que entra,<br><em>en su lugar.</em></h2>
+          <p>Un flujo claro desde la factura hasta las unidades disponibles.</p>
+          <div class="login-route"><span>01&nbsp; DOCUMENTO</span><b>→</b><span>02&nbsp; REVISIÓN</span><b>→</b><span>03&nbsp; STOCK</span></div>
+        </div>''', unsafe_allow_html=True)
+    with login:
+        st.markdown("### Iniciar sesión")
+        st.caption("Ingresa para continuar en tu inventario.")
     if locked_for:
-        st.warning(f"Acceso temporalmente bloqueado. Vuelve a intentar en {locked_for // 60 + 1} min.")
+        with login:
+            st.warning(f"Acceso temporalmente bloqueado. Vuelve a intentar en {locked_for // 60 + 1} min.")
         return False
-    with st.form("inventory_login", clear_on_submit=True):
+    with login, st.form("inventory_login", clear_on_submit=True):
         username = st.text_input("Usuario", autocomplete="username")
         password = st.text_input("Contraseña", type="password", autocomplete="current-password")
-        submitted = st.form_submit_button("Entrar", type="primary")
+        submitted = st.form_submit_button("Entrar", type="primary", use_container_width=True)
     if not submitted:
         return False
 
