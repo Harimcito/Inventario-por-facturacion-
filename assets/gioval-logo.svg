@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-label="Giovalia">
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4658FF"/>
+      <stop offset="1" stop-color="#1424C7"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="34" fill="url(#blue)"/>
+  <circle cx="198" cy="57" r="16" fill="#FFD36D"/>
+  <path d="M172 79a78 78 0 1 0 0 98" fill="none" stroke="#fff" stroke-width="34" stroke-linecap="round"/>
+  <rect x="113" y="111" width="92" height="34" rx="17" fill="#fff"/>
+</svg>
+
