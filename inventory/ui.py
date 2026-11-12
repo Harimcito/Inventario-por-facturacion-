@@ -396,6 +396,8 @@ def products(con):
             category = st.selectbox("Categoría", PRODUCT_CATEGORIES,
                                     index=PRODUCT_CATEGORIES.index(STATIONERY_CATEGORY))
             description = st.text_input("Descripción / formato / variante", placeholder="Ej.: sabor, tamaño, color o presentación")
+            gioval_product_id = st.text_input("ID global de Gioval (opcional)",
+                help="Pégalo solo después de confirmar que es el mismo producto y variante en la ficha maestra de Gioval. No se asigna por coincidencia de nombre o alias.")
             a, b, c = st.columns(3)
             stock = a.number_input("Stock inicial (unidades)", 0, 100000, 0)
             cost = b.number_input("Costo unitario", 0, 100000000, 0)
@@ -408,9 +410,10 @@ def products(con):
                     st.error("Escribe el nombre del producto.")
                 else:
                     try:
+                        gioval_id = normalize_gioval_product_id(gioval_product_id)
                         with con:
-                            con.execute("INSERT INTO products(name,category,description,stock,cost,margin,min_stock) VALUES(?,?,?,?,?,?,?)",
-                                (name.strip(), category.strip(), description.strip(), stock, cost, margin, min_stock))
+                            con.execute("INSERT INTO products(name,category,description,stock,cost,margin,min_stock,gioval_product_id) VALUES(?,?,?,?,?,?,?,?)",
+                                (name.strip(), category.strip(), description.strip(), stock, cost, margin, min_stock, gioval_id))
                         flash_on_next_render(f"{name.strip()} quedó agregado al catálogo", "✨")
                         st.rerun()
                     except Exception as exc:
@@ -532,6 +535,8 @@ def products(con):
                     if product["category"] in PRODUCT_CATEGORIES
                     else PRODUCT_CATEGORIES.index(STATIONERY_CATEGORY))
             description = st.text_input("Descripción / formato / variante", product["description"] or "")
+            gioval_product_id = st.text_input("ID global de Gioval (opcional)", product["gioval_product_id"] or "",
+                help="Pégalo solo después de confirmar que es el mismo producto y variante en la ficha maestra de Gioval. Borrar el campo quita el vínculo.")
             current_aliases = [r[0] for r in con.execute("SELECT alias FROM product_aliases WHERE product_id=? ORDER BY alias", (product["id"],))]
             aliases_text = st.text_input("Nombres alternativos de proveedores (separados por coma)", ", ".join(current_aliases),
                 help="Se usarán para reconocer este producto en próximas facturas.")
@@ -628,7 +633,7 @@ def exports(con, root: Path):
         FROM products p WHERE p.active=1 AND p.item_type='Mercadería' ORDER BY p.name""").fetchall()
     out = io.StringIO(); writer = csv.writer(out)
     writer.writerow(["Producto", "Descripción", "Categoría", "ID global Gioval", "Nombres alternativos", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
-    writer.writerows([(row["name"], row["description"], row["category"], row["aliases"], row["stock"],
+    writer.writerows([(row["name"], row["description"], row["category"], row["gioval_product_id"], row["aliases"], row["stock"],
                        row["min_stock"], row["cost"], row["margin"], row["suggested"]) for row in products])
     st.download_button("Descargar inventario en CSV", out.getvalue().encode("utf-8-sig"), "inventario.csv", "text/csv")
     if st.button("Preparar respaldo completo (base + documentos)", type="primary"):
