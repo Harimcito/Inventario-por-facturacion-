@@ -1,5 +1,6 @@
 """Persistencia SQLite y operaciones de inventario."""
 import sqlite3
+import uuid
 from pathlib import Path
 
 from inventory.classifier import PRODUCT_CATEGORIES, suggest_product_category
@@ -18,7 +19,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
       stock INTEGER NOT NULL DEFAULT 0, cost INTEGER NOT NULL DEFAULT 0,
       margin REAL NOT NULL DEFAULT 30, active INTEGER NOT NULL DEFAULT 1,
       min_stock INTEGER NOT NULL DEFAULT 3, description TEXT DEFAULT '',
-      item_type TEXT NOT NULL DEFAULT 'Mercadería'
+      item_type TEXT NOT NULL DEFAULT 'Mercadería',
+      gioval_product_id TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS receipts(
       id INTEGER PRIMARY KEY, supplier TEXT, invoice_no TEXT, doc_date TEXT,
@@ -55,7 +57,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
     receipt_columns = {row[1] for row in con.execute("PRAGMA table_info(receipts)")}
     migrations = {
         "products": (("min_stock", "INTEGER NOT NULL DEFAULT 3"), ("description", "TEXT DEFAULT ''"),
-                     ("item_type", "TEXT NOT NULL DEFAULT 'Mercadería'")),
+                     ("item_type", "TEXT NOT NULL DEFAULT 'Mercadería'"),
+                     ("gioval_product_id", "TEXT NOT NULL DEFAULT ''")),
         "receipt_lines": (("line_type", "TEXT NOT NULL DEFAULT 'Mercadería'"),),
         "receipts": (("rut", "TEXT DEFAULT ''"), ("doc_type", "TEXT DEFAULT ''"),
                      ("duplicate_of", "INTEGER"), ("total_amount", "TEXT DEFAULT ''"),
@@ -66,6 +69,8 @@ def connect(db_path: Path) -> sqlite3.Connection:
         for column, definition in columns:
             if column not in present:
                 con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    con.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_products_gioval_product_id "
+                "ON products(gioval_product_id) WHERE gioval_product_id <> ''")
     con.execute("CREATE INDEX IF NOT EXISTS idx_receipts_duplicate ON receipts(duplicate_of)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_receipt_lines_receipt ON receipt_lines(receipt_id)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_adjustments_product ON inventory_adjustments(product_id)")
@@ -202,25 +207,41 @@ def record_receipt(con, receipt: dict, items: list[dict], document_path: Path,
     return receipt_id
 
 
+def normalize_gioval_product_id(value: str | None) -> str:
+    """Devuelve un UUID canónico o una cadena vacía para una relación no asignada."""
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    try:
+        return str(uuid.UUID(value))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError("El ID global de Gioval debe ser un UUID válido.") from exc
+
+
 def update_product(con, product_id: int, name: str, category: str, new_stock: int,
                    cost: int, margin: float, min_stock: int, adjustment_reason: str = "",
-                   description: str = "", aliases: list[str] | None = None):
+                   description: str = "", aliases: list[str] | None = None,
+                   gioval_product_id: str | None = None):
     """Actualiza ficha; todo cambio manual de unidades deja un ajuste auditable."""
     name = clean_product_name(name)
     if not name:
         raise ValueError("El nombre del producto no puede quedar vacío.")
     if category not in PRODUCT_CATEGORIES:
         raise ValueError("Elige una de las dos categorías del inventario.")
-    current = con.execute("SELECT stock FROM products WHERE id=?", (product_id,)).fetchone()
+    current = con.execute("SELECT stock,gioval_product_id FROM products WHERE id=?", (product_id,)).fetchone()
     if not current:
         raise ValueError("No se encontró el producto.")
     old_stock = int(current["stock"])
+    gioval_id = (normalize_gioval_product_id(gioval_product_id)
+                 if gioval_product_id is not None
+                 else current["gioval_product_id"])
     delta = int(new_stock) - old_stock
     if delta and not adjustment_reason.strip():
         raise ValueError("Explica brevemente el motivo del ajuste de stock.")
     with con:
-        con.execute("""UPDATE products SET name=?,category=?,description=?,stock=?,cost=?,margin=?,min_stock=? WHERE id=?""",
-                    (name, category.strip(), description.strip(), new_stock, cost, margin, min_stock, product_id))
+        con.execute("""UPDATE products SET name=?,category=?,description=?,stock=?,cost=?,margin=?,min_stock=?,
+                    gioval_product_id=? WHERE id=?""",
+                    (name, category.strip(), description.strip(), new_stock, cost, margin, min_stock, gioval_id, product_id))
         if aliases is not None:
             con.execute("DELETE FROM product_aliases WHERE product_id=?", (product_id,))
             for alias in aliases:
