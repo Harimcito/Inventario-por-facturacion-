@@ -7,7 +7,8 @@ from pathlib import Path
 from datetime import date
 import streamlit as st
 
-from inventory.database import find_duplicate, record_receipt, update_product, set_product_classification
+from inventory.database import (find_duplicate, record_receipt, update_product, set_product_classification,
+                                normalize_gioval_product_id)
 from inventory.readers import ai_extract, drafts_from_upload, local_ocr, openai_key, document_preview
 from inventory.theme import page_header, flash_on_next_render
 from inventory.text import clean_product_name, normalize_product_key, display_product_name, parse_clp, parse_invoice_quantity
@@ -549,7 +550,8 @@ def products(con):
                 else:
                     try:
                         aliases = [alias.strip() for alias in aliases_text.split(",") if alias.strip()]
-                        update_product(con, product["id"], name, category, stock, cost, margin, min_stock, reason, description, aliases)
+                        update_product(con, product["id"], name, category, stock, cost, margin, min_stock, reason, description, aliases,
+                                       gioval_product_id=gioval_product_id)
                         flash_on_next_render(f"Cambios de {name} guardados", "💾")
                         st.rerun()
                     except Exception as exc:
@@ -620,12 +622,12 @@ def exports(con, root: Path):
     import csv, io, zipfile
     from datetime import datetime
     page_header("Copias de seguridad", "Descarga una copia para guardar tus productos y documentos.")
-    products = con.execute("""SELECT p.name,p.description,p.category,p.stock,p.min_stock,p.cost,p.margin,
+    products = con.execute("""SELECT p.name,p.description,p.category,p.gioval_product_id,p.stock,p.min_stock,p.cost,p.margin,
         ROUND(p.cost*(1+p.margin/100)) AS suggested,
         (SELECT group_concat(alias, '; ') FROM product_aliases a WHERE a.product_id=p.id) AS aliases
         FROM products p WHERE p.active=1 AND p.item_type='Mercadería' ORDER BY p.name""").fetchall()
     out = io.StringIO(); writer = csv.writer(out)
-    writer.writerow(["Producto", "Descripción", "Categoría", "Nombres alternativos", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
+    writer.writerow(["Producto", "Descripción", "Categoría", "ID global Gioval", "Nombres alternativos", "Stock", "Stock mínimo", "Costo", "Margen %", "Precio sugerido"])
     writer.writerows([(row["name"], row["description"], row["category"], row["aliases"], row["stock"],
                        row["min_stock"], row["cost"], row["margin"], row["suggested"]) for row in products])
     st.download_button("Descargar inventario en CSV", out.getvalue().encode("utf-8-sig"), "inventario.csv", "text/csv")
